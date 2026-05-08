@@ -1,0 +1,10 @@
+{
+  "name": "turfiq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "TurfIQ — soil moisture tracker for golf course landscapers",
+  "scripts": {
+    "dev": "npx serve .",
+    "start": "npx serve ."
+  }
+}
