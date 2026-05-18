@@ -1,16 +1,25 @@
-// ───────── Capture screen — simple ─────────
-const { useState, useEffect, useRef } = React;
+import { useEffect, useState, type ChangeEvent } from 'react';
+import type { Phase, Reading } from '../types';
+import { COURSE } from '../lib/mockData';
+import { moistureBand, moistureColor } from '../lib/moisture';
+import { fmtTime } from '../lib/time';
+import { PhaseAfterIcon, PhaseBeforeIcon } from '../components/icons';
 
-function CaptureScreen({ onLog, recent }) {
-  const [value, setValue] = useState(18.0);
+interface Props {
+  onLog: (r: Reading) => void;
+  recent: Reading[];
+}
+
+export function CaptureScreen({ onLog, recent }: Props) {
+  const [value, setValue] = useState<number | ''>(18.0);
   const [hole, setHole] = useState(7);
-  const [phase, setPhase] = useState('before');
-
-  // simulated GPS lock
+  const [phase, setPhase] = useState<Phase>('before');
   const [coords, setCoords] = useState({ lat: 36.5547, lon: -121.9231, acc: 2.4 });
+  const [now, setNow] = useState(new Date());
+
   useEffect(() => {
     const id = setInterval(() => {
-      setCoords(c => ({
+      setCoords((c) => ({
         lat: c.lat + (Math.random() - 0.5) * 0.00002,
         lon: c.lon + (Math.random() - 0.5) * 0.00002,
         acc: 1.8 + Math.random() * 1.4,
@@ -19,55 +28,54 @@ function CaptureScreen({ onLog, recent }) {
     return () => clearInterval(id);
   }, []);
 
-  // live clock for stamp
-  const [now, setNow] = useState(new Date());
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
     return () => clearInterval(id);
   }, []);
 
-  const v = parseFloat(value) || 0;
-  const band = window.moistureBand(v);
-  const swatch = window.moistureColor(v);
+  const v = typeof value === 'number' ? value : parseFloat(value) || 0;
+  const band = moistureBand(v);
+  const swatch = moistureColor(v);
 
-  const onSlide = (e) => setValue(parseFloat(e.target.value));
-  const onType = (e) => {
+  const onSlide = (e: ChangeEvent<HTMLInputElement>) => setValue(parseFloat(e.target.value));
+  const onType = (e: ChangeEvent<HTMLInputElement>) => {
     const n = e.target.value;
-    if (n === "") { setValue(""); return; }
+    if (n === '') { setValue(''); return; }
     const num = parseFloat(n);
-    if (!isNaN(num)) setValue(Math.max(0, Math.min(40, num)));
+    if (!Number.isNaN(num)) setValue(Math.max(0, Math.min(40, num)));
   };
 
-  const canLog = parseFloat(value) > 0 && hole;
+  const canLog = v > 0 && hole > 0;
   const onSave = () => {
     if (!canLog) return;
     onLog({
       hole,
-      value: Math.round(parseFloat(value) * 10) / 10,
+      value: Math.round(v * 10) / 10,
       t: Date.now(),
       phase,
       pos: 'middle',
       tech: 'JM',
       lat: coords.lat,
-      lon: coords.lon
+      lon: coords.lon,
+      v: 1,
     });
     setValue(18.0);
   };
 
-  // marker on slider track (0–40 → 0–100%)
   const pct = Math.max(0, Math.min(100, (v / 40) * 100));
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
+  const meta = COURSE.holes[hole - 1]!;
+  const last = recent[0];
 
   return (
     <div className="capture-simple">
       <div className="cs-hero">
         <div className="eyebrow">New reading · TDR-350</div>
         <h1 className="cs-q">
-          What's the <i>moisture</i><br/>on hole {hole}?
+          What's the <i>moisture</i><br />on hole {hole}?
         </h1>
       </div>
 
-      {/* Before / After watering */}
       <div className="cs-section">
         <div className="cs-label">
           <span>Reading phase</span>
@@ -75,54 +83,40 @@ function CaptureScreen({ onLog, recent }) {
         </div>
         <div className="cs-phase">
           <button
-            className={"cs-phase-btn" + (phase === 'before' ? ' sel' : '')}
-            onClick={() => setPhase('before')}>
-            <span className="cs-phase-ico">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3v9M12 12 L8 8 M12 12 L16 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" opacity="0.4"/>
-                <path d="M5 17 Q12 21 19 17" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none"/>
-              </svg>
-            </span>
-            <span className="cs-phase-l">
-              <b>Before</b>
-              <small>watering</small>
-            </span>
+            className={'cs-phase-btn' + (phase === 'before' ? ' sel' : '')}
+            onClick={() => setPhase('before')}
+          >
+            <span className="cs-phase-ico"><PhaseBeforeIcon /></span>
+            <span className="cs-phase-l"><b>Before</b><small>watering</small></span>
           </button>
           <button
-            className={"cs-phase-btn" + (phase === 'after' ? ' sel' : '')}
-            onClick={() => setPhase('after')}>
-            <span className="cs-phase-ico">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3 C8 8 6 11 6 14 a6 6 0 0 0 12 0 c0 -3 -2 -6 -6 -11z" fill="currentColor" opacity="0.85"/>
-              </svg>
-            </span>
-            <span className="cs-phase-l">
-              <b>After</b>
-              <small>watering</small>
-            </span>
+            className={'cs-phase-btn' + (phase === 'after' ? ' sel' : '')}
+            onClick={() => setPhase('after')}
+          >
+            <span className="cs-phase-ico"><PhaseAfterIcon /></span>
+            <span className="cs-phase-l"><b>After</b><small>watering</small></span>
           </button>
         </div>
       </div>
 
-      {/* Hole picker — compact */}
       <div className="cs-section">
         <div className="cs-label">
           <span>Hole</span>
-          <span className="cs-meta">Par {window.COURSE.holes[hole-1].par} · {window.COURSE.holes[hole-1].yds}y</span>
+          <span className="cs-meta">Par {meta.par} · {meta.yds}y</span>
         </div>
         <div className="cs-hole-strip">
-          {window.COURSE.holes.map(h => (
+          {COURSE.holes.map((h) => (
             <button
               key={h.n}
-              className={"cs-hole-btn" + (hole === h.n ? " sel" : "")}
-              onClick={() => setHole(h.n)}>
+              className={'cs-hole-btn' + (hole === h.n ? ' sel' : '')}
+              onClick={() => setHole(h.n)}
+            >
               {h.n}
             </button>
           ))}
         </div>
       </div>
 
-      {/* Big number + slider */}
       <div className="cs-section cs-moisture">
         <div className="cs-label">
           <span>Volumetric water content</span>
@@ -141,8 +135,8 @@ function CaptureScreen({ onLog, recent }) {
             onChange={onType}
           />
           <span className="cs-unit">%</span>
-          <span className={"cs-band " + band.cls}>
-            <span className="cs-swatch" style={{ background: swatch }}></span>
+          <span className={'cs-band ' + band.cls}>
+            <span className="cs-swatch" style={{ background: swatch }} />
             {band.name}
           </span>
         </div>
@@ -153,10 +147,10 @@ function CaptureScreen({ onLog, recent }) {
             min="0"
             max="40"
             step="0.1"
-            value={value || 0}
+            value={v}
             onChange={onSlide}
             className="cs-slider"
-            style={{ '--pct': pct + '%', '--c': swatch }}
+            style={{ ['--pct' as never]: pct + '%', ['--c' as never]: swatch }}
           />
           <div className="cs-slider-ticks">
             <span>0</span>
@@ -168,9 +162,8 @@ function CaptureScreen({ onLog, recent }) {
         </div>
       </div>
 
-      {/* Auto-captured footer (small) */}
       <div className="cs-auto">
-        <span className="cs-auto-dot"></span>
+        <span className="cs-auto-dot" />
         Auto · {coords.lat.toFixed(4)}°N {Math.abs(coords.lon).toFixed(4)}°W · {timeStr}
       </div>
 
@@ -178,14 +171,12 @@ function CaptureScreen({ onLog, recent }) {
         Submit reading <span className="arrow">→</span>
       </button>
 
-      {recent.length > 0 && (
+      {last && (
         <div className="cs-last">
-          <span className="cs-auto-dot" style={{ background: 'var(--bone-3)' }}></span>
-          Last: hole {recent[0].hole} · {recent[0].value.toFixed(1)}% · {window.fmtTime(recent[0].t)}
+          <span className="cs-auto-dot" style={{ background: 'var(--bone-3)' }} />
+          Last: hole {last.hole} · {last.value.toFixed(1)}% · {fmtTime(last.t)}
         </div>
       )}
     </div>
   );
 }
-
-window.CaptureScreen = CaptureScreen;
