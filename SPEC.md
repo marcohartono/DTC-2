@@ -1,9 +1,9 @@
 # TurfIQ — Product Specification
 
-**Version:** 0.1 (prototype audit)
-**Status:** High-fidelity prototype with seeded mock data
-**Last updated:** 2026-05-15
-**Source of truth:** `/Users/marcohartono/DTC-2` (commit on `main`)
+**Version:** 0.2 (post team-meeting re-scope)
+**Status:** Prototype shipped; MVP scope locked in (Supabase, photo capture, geofencing, weather predictions)
+**Last updated:** 2026-05-20
+**Source of truth:** `DTC-2` repo on `main`
 
 ---
 
@@ -42,17 +42,18 @@ The top bar hard-codes `JM · Cypress Bend` as the operator in the Analysis view
 
 ## 3. Existing features
 
-This section catalogues what works in the prototype today. Every behaviour listed has been verified against the source.
+This section catalogues what is shipped in the codebase today. Every behaviour listed is wired up in `src/`.
 
-### 3.1 App shell (`app.jsx`)
+### 3.1 App shell (`src/App.tsx`)
 
-- Two-tab application wrapped in a simulated iPhone bezel (`ios-frame.jsx`, `IOSDevice` 390×844).
-- Sticky top bar with the **TurfIQ** wordmark and contextual meta — a pulsing `GPS · LOCKED · ±2.4m` pill on the Capture tab, and `JM · Cypress Bend · [date] · N READINGS TODAY` on Analysis.
-- Bottom tab bar with three buttons: **Capture**, **Analysis**, **History**. The History button currently routes to the Analysis screen — it is a stub.
+- Three-tab application: **Capture**, **Analysis**, **History** — all wired (History is no longer a stub).
+- Sticky top bar with the **TurfIQ** wordmark and contextual meta — a live GPS pill on Capture (real `accuracy` from `watchPosition`) and `{tech} · Cypress Bend · [date] · N READINGS TODAY` on Analysis. The tech badge is tappable to re-open the tech picker.
 - A "Reading saved" toast (`✓` glyph, mossy pill, 1.8 s auto-dismiss) confirms each capture.
-- All state lives in React `useState` on the `App` component. Refreshing the page wipes any newly captured readings.
+- Reading state lives in `ReadingsContext` (`src/context/ReadingsContext.tsx`) and is hydrated from IndexedDB on mount.
+- Error boundary (`src/components/ErrorBoundary.tsx`) wraps `Shell` so a render error doesn't blank the frame.
+- Responsive layout: full viewport on phones; centred 440 px column on desktop. The fixed-390×844 iPhone bezel from the original prototype has been removed.
 
-### 3.2 Capture screen (`capture.jsx`)
+### 3.2 Capture screen (`src/screens/CaptureScreen.tsx`)
 
 The capture flow is built around the question "What's the moisture on hole N?" rendered as a serif headline.
 
@@ -60,16 +61,16 @@ The capture flow is built around the question "What's the moisture on hole N?" r
 - **Hole picker**: a horizontally-scrolling strip of 18 numbered buttons. The selected hole shows its par and yardage in the section meta (`Par 4 · 412y`).
 - **VWC readout**: a giant editable serif number with a `%` unit. Range `0–40` enforced on input. The current value snaps to a colour swatch and a moisture band label (Critical dry → Critical wet, see §6.1).
 - **Slider**: a 0–40 range slider with a gradient track matching the moisture scale. The thumb is a paper-coloured pill with a moss border; the slider and the typed number are bound to the same `value`.
-- **Auto stamp**: a small mono-font footer reads `Auto · 36.5547°N 121.9230°W · HH:MM` and refreshes the clock every second.
-- **GPS simulation**: `useEffect` updates lat/lon every 1.5 s with sub-metre jitter, and accuracy floats in a 1.8–3.2 m range. The `±2.4m` figure in the top bar is decorative.
-- **Submit button**: "Submit reading →" — disabled until value > 0 and a hole is selected. On submit it prepends a reading to the in-memory array, fires the toast, and resets the value to 18.0.
+- **Real GPS**: `useGps()` in `src/lib/gps.ts` calls `navigator.geolocation.watchPosition` with `enableHighAccuracy: true`; falls back to simulated jitter if permission is denied or the API is unavailable. The auto-stamp footer reads `{Live|Sim} · 36.5547°N 121.9230°W · ±{acc}m · HH:MM`.
+- **Submit button**: "Submit reading →" — disabled until value > 0 and a hole is selected. On submit it prepends a reading to context, writes through to IndexedDB, fires the toast, and resets the value to 18.0.
 - **Last-reading caption**: under the CTA, "Last: hole N · X.X% · Y ago" using a relative-time formatter.
+- **Position pill** (`src/components/PositionPill.tsx`, mounted at `CaptureScreen.tsx:123`): three-way `front` / `middle` / `back` selector. **Scheduled for removal — see §4.4.**
 
-The tech identifier is hard-coded to `'JM'` and `pos` to `'middle'` on every capture — the data model supports `front | middle | back` but the UI does not collect position in this screen.
+The tech identifier is sourced from the tech picker (`src/components/TechPicker.tsx`), persisted in localStorage via `src/lib/storage.ts`. First-run flow prompts the user for 2–4 letter initials.
 
-### 3.3 Analysis screen (`analysis.jsx`)
+### 3.3 Analysis screen (`src/screens/AnalysisScreen.tsx`)
 
-A page header with `Cypress Bend · Carmel-by-the-Sea, CA` and a serif "Field analysis" title sits above a 24h / 7d / 30d range picker and a (non-functional) `⬇ export csv` button. A three-way mode toggle switches between Heatmap, Trends, and Readings.
+A page header with `Cypress Bend · Carmel-by-the-Sea, CA` and a serif "Field analysis" title sits above a 24h / 7d / 30d range picker and a working `⬇ export csv` button (downloads `turfiq_[course]_[range]_[date].csv` via `src/lib/csv.ts`). A three-way mode toggle switches between Heatmap, Trends, and Readings.
 
 **Heatmap mode** is the default and the centerpiece:
 
@@ -96,7 +97,15 @@ A page header with `Cypress Bend · Carmel-by-the-Sea, CA` and a serif "Field an
 
 **Readings mode**: a horizontal hole-strip selector at the top (each button gets a colour dot matching its average), then up to 8 rows showing timestamp + relative time, phase pill (`● before` / `◆ after`), lat/lon, position, tech initials, and the VWC value with a thin colour swatch.
 
-### 3.4 Mock data engine (`data.js`)
+### 3.4 History screen (`src/screens/HistoryScreen.tsx`)
+
+A chronological reverse-time feed of every reading. Filterable by tech (All / Me / individual techs) and by range (24h / 7d / 30d). Each row shows `#{hole}`, timestamp + relative time, phase pill (`● before` / `◆ after`), position, tech, and VWC with a colour swatch. Tapping a row jumps to that hole in Analysis. Empty state ("No readings in range") when filters yield nothing. Same CSV export button as Analysis, with the active tech filter applied.
+
+### 3.5 Persistence (`src/lib/db.ts`, `src/context/ReadingsContext.tsx`)
+
+Readings are stored in IndexedDB (database `turfiq`, object store `readings`, indexes on `t`, `hole`, `tech`). `ReadingsContext` calls `seedIfEmpty()` on first run with mock data, then `loadAllReadings()` on every mount, and write-throughs on `addReading`. The `Reading` type carries an optional `v: 1` field for future schema migrations. **This entire layer is slated for removal — see §4.1.**
+
+### 3.6 Mock data engine (`src/lib/mockData.ts`)
 
 A deterministic-ish seed function generates `7 days × 18 holes × ~3 readings/day` of realistic VWC values:
 
@@ -110,103 +119,140 @@ Three helpers are exposed on `window`:
 - `moistureBand(v)` — named band + `dry|opt|wet` CSS class.
 - `fmtTime(ts)` and `fmtTimeShort(ts)` — relative ("3h ago") and short absolute ("May 14 · 7:42 AM") timestamps.
 
-### 3.5 iOS device frame (`ios-frame.jsx`)
+### 3.7 Hosting & deploy
 
-A self-contained iOS 26 "Liquid Glass" mockup library: the `IOSDevice` bezel, dynamic island, status bar, glass nav pills, grouped list rows, and a full QWERTY keyboard with blurred backdrop. The current app uses only the `IOSDevice` wrapper, but the rest of the components are available and could be wired into onboarding or settings flows later.
-
-### 3.6 Hosting & deploy
-
-- Pure static site, no build step. Vercel auto-detects it and serves the files as-is.
-- `vercel.json` provides cache headers and clean URLs (not read in this audit, called out by the README).
-- README documents three deploy paths (drag-and-drop, GitHub-connected, CLI) and a PWA-style "Add to Home Screen" instruction for iOS/Android.
+- Vite-built static site shipped to Vercel. Build command `npm run build`, output `dist/`.
+- `vercel.json` provides cache headers and clean URLs.
+- README documents Vercel deploy (CLI or GitHub-connected) and "Add to Home Screen" usage on iOS/Android.
 
 ---
 
-## 4. Intended features
+## 4. Intended features (MVP scope)
 
-These are features the README, the data model, or the existing UI shells already imply but which are not yet implemented. They are the natural next-version scope.
+The team meeting on 2026-05-20 locked the following items as the MVP scope to get past the demo. Each ships incrementally; the order roughly mirrors dependency (Supabase first, since geofencing/photos/weather all write to it).
 
-### 4.1 Real device integration
+### 4.1 Supabase as primary store (replaces IndexedDB)
 
-- **Live GPS** — replace the simulated coordinate jitter with `navigator.geolocation.watchPosition()`. The capture record already has `lat` / `lon` fields and a footer that displays them; the accuracy pill in the top bar (`±2.4m`) should reflect the real reading's `accuracy`.
-- **TDR pairing (future)** — the eyebrow text "New reading · TDR-350" hints at a specific Spectrum Technologies probe. A v2 could read VWC directly via Bluetooth instead of asking the tech to type it. implement the data to update an existing firebase database. 
+- All reads and writes go to Supabase Postgres. The IndexedDB layer in `src/lib/db.ts` is **removed**, not augmented.
+- Schema migrations live in `supabase/migrations/`. See §5 for table shapes.
+- `ReadingsContext` switches to `@supabase/supabase-js` client. On mount it issues a `select` for the current course's readings; it then subscribes to the `readings` table for live multi-device updates.
+- Env vars: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
+- No offline outbox in MVP. If a write fails because the device is offline, the UI surfaces an error toast and the tech retries. (Outbox / offline-first is a future revisit; see Roadmap stretch.)
 
-### 4.2 Persistence
+### 4.2 Geofencing for automatic hole detection
 
-- **Local-first storage** — swap the in-memory `READINGS` array for `localStorage` or IndexedDB so a tab refresh, an Add-to-Home-Screen launch, or a phone reboot does not wipe captures.
-- **Schema versioning** — once stored, the reading shape (§5) needs a `v` field so future migrations are safe.
+- Each course has a `geojson_holes` column containing a `FeatureCollection` of 18 green polygons (traced once at course onboarding).
+- On the Capture screen, the user's lat/lon is point-in-polygon tested against the polygons every GPS tick.
+- If a match is found, the hole picker auto-selects that hole and shows a `Detected · hole N` pill above the strip.
+- If GPS accuracy is worse than ~10 m or no polygon contains the point, the auto-select is suppressed and the manual hole picker remains the source of truth.
+- The horizontal hole strip stays in the UI — geofencing only changes the default selection, never locks it.
 
-### 4.3 Offline-first PWA
+### 4.3 Photo-first TDR capture
 
-- Add a `manifest.json` with the TurfIQ icon, name, and theme colour.
-- Add a service worker that pre-caches the app shell and queues captures while offline (greens are routinely out of cell range).
-- Ship a real install card on first run rather than relying on the user to find Safari's Share → Add to Home Screen.
+- The Capture screen's primary action becomes a large `📷 Photo of TDR` button above the VWC readout.
+- A toggle (`Type manually instead`) reveals the existing slider + number input as a fallback.
+- Photo flow:
+  1. User taps the button → `<input type="file" accept="image/*" capture="environment">` opens the camera.
+  2. Image uploads to Supabase Storage bucket `tdr-photos` (path `{course_id}/{reading_id}.jpg`).
+  3. Frontend calls Edge Function `analyze-tdr-photo` with the storage path.
+  4. Edge Function calls OpenAI Vision (`gpt-4o-mini` is enough; cost is well under a cent per call) with a prompt like *"Extract the VWC percentage shown on this TDR-350 screen. Reply with just a number, no units."*
+  5. Returned number pre-fills the VWC field; the user confirms or edits before tapping Submit.
+  6. On submit, the reading row is written with `photo_url` set to the storage path.
+- The OpenAI key lives only in the Edge Function's secret store. The client never sees it.
 
-### 4.4 CSV export (wire the existing button)
+### 4.4 Remove the position pill
 
-The Analysis header already renders a `⬇ export csv` button. It is currently inert. Intended behaviour:
+The `front` / `middle` / `back` selector adds no decision value in the field. Cut it:
 
-- Export the readings inside the selected date range, filtered by hole if a hole is selected.
-- Columns: `timestamp_iso, hole, par, value_vwc, phase, position, tech, lat, lon`.
-- Produce a `Blob` and trigger a download named `turfiq_[course]_[range].csv`.
+- Delete `src/components/PositionPill.tsx`.
+- Remove the `pos: Position` field from `Reading` in `src/types.ts`.
+- Remove the `pos` state and JSX from `src/screens/CaptureScreen.tsx`.
+- Remove the `pos` cell from the Readings table in `src/screens/AnalysisScreen.tsx` and from the row template in `src/screens/HistoryScreen.tsx`.
+- Drop `position` from the CSV header in `src/lib/csv.ts`.
+- Do **not** include a `pos` column in the Supabase `readings` migration.
 
+### 4.5 Weather + 7-day VWC prediction
 
+- **Edge Function `pull-weather`** — runs hourly via Supabase cron. For each course, fetches NOAA's hourly observation + 7-day forecast for the course's lat/lon. Writes one row to `weather_snapshots` per pull.
+- **Edge Function `predict-vwc`** — runs nightly. Per hole:
+  - Pulls the last 30 days of `readings`.
+  - Pulls the next 7 days of NOAA forecast (`weather_snapshots` rows with `t > now()`).
+  - Fits a small regression (start with linear; features: recent avg VWC, days since last `after` reading, forecast precip, forecast temp).
+  - Writes 7 rows into `vwc_predictions` (`t_target` = now + 1d, +2d, …, +7d).
+- **Frontend overlay:**
+  - Heatmap gains a `Forecast` toggle: `Today` (current data), `+1d`, `+3d`, `+7d`. Switching the toggle re-colours each green from the matching `vwc_predictions` row instead of measured averages.
+  - Trend chart adds a dashed extension after the latest measured point, plotting the 7 predicted values for that hole.
 
-### 4.6 History tab
+### 4.6 Authentication (stretch)
 
-The tab bar already has a **History** button — wired to the Analysis screen as a stub. Intended scope: a chronological reverse-time feed of every reading the current tech has captured (or every reading on the course, switchable), separate from the per-hole Analysis view. This is the "what did we do this week" log, distinct from "where is the course right now".
+Slated for the end of the MVP push if time allows. Out of scope for the v1 demo cut.
 
-### 4.7 Position-aware capture
-
-The data model carries `pos: 'front' | 'middle' | 'back'` (where on the green the probe went in), but the simple Capture screen hard-codes `'middle'`. Intended UI: a three-way pill row under the hole picker — the older keypad-style mock (`pos-row` in `styles.css`) is still present in the stylesheet but no longer mounted, suggesting an earlier prototype that should be reintroduced.
-
-### 4.8 Tech identity
-
-`tech: 'JM'` is hard-coded in `capture.jsx`. Intended: pull from the signed-in user (once auth exists), or at minimum a one-time "Who are you?" picker stored locally.
-
-### 4.9 Alerting / push
-
-`isCritical` (VWC < 12 % or > 26 %) already drives a pulsing ring in the heatmap and an `⚠ ATTN` badge in Trends mode. A natural next step is a push notification when a hole crosses into a critical band — useful when the superintendent isn't actively looking at the app.
+- Supabase magic-link auth.
+- The local tech picker is replaced by the authenticated user's stored initials.
+- Row Level Security policies scope `readings` to the user's course memberships.
+- A `memberships` join table lets one user belong to multiple courses; a course picker appears on sign-in if `count(memberships) > 1`.
 
 ---
 
-## 5. Data model
+## 5. Data model (Supabase schema)
 
-The only entity today is a **Reading**. Shape (as emitted by both `data.js` seed and the Capture submit handler):
+The MVP backend is a single Postgres database. Schema migrations live in `supabase/migrations/`.
 
-```
-Reading {
-  hole:  1..18           // selected hole number
-  value: 0..40           // VWC %, rounded to 1 decimal
-  t:     number          // unix ms timestamp
-  phase: 'before' | 'after'
-  pos:   'front' | 'middle' | 'back'
-  tech:  'JM' | 'AR' | 'CH'
-  lat:   number          // decimal degrees
-  lon:   number          // decimal degrees
-}
-```
+### `readings`
 
-The **Course** is currently a singleton on `window.COURSE`:
+| column        | type          | notes                                              |
+| ------------- | ------------- | -------------------------------------------------- |
+| `id`          | `uuid`        | pk, default `gen_random_uuid()`                    |
+| `course_id`   | `uuid`        | fk → `courses.id`                                  |
+| `hole`        | `int`         | 1..18                                              |
+| `vwc_value`   | `numeric`     | 0..40 (%), rounded to 1 decimal                    |
+| `phase`       | `text`        | `'before'` \| `'after'`                            |
+| `t`           | `timestamptz` | reading timestamp                                  |
+| `lat`         | `numeric`     | decimal degrees                                    |
+| `lon`         | `numeric`     | decimal degrees                                    |
+| `tech`        | `text`        | initials; becomes fk → `users.id` once auth ships  |
+| `photo_url`   | `text`        | nullable; Supabase Storage path for the TDR photo  |
+| `created_at`  | `timestamptz` | default `now()`                                    |
 
-```
-Course {
-  name:  string
-  city:  string
-  w, h:  number         // SVG canvas size
-  holes: Hole[18]
-}
+**Removed from the prior model:** `pos` (front/middle/back) — feature cut per §4.4.
 
-Hole {
-  n:   1..18
-  par: 3 | 4 | 5
-  yds: number          // yardage
-  gx, gy: number       // green coords on canvas
-  tx, ty: number       // tee coords on canvas
-}
-```
+### `courses`
 
-For a real backend, this becomes three tables: `courses`, `holes (course_id)`, `readings (course_id, hole_n, …)`, with a `users` table once multi-tech sync ships.
+| column          | type    | notes                                                          |
+| --------------- | ------- | -------------------------------------------------------------- |
+| `id`            | `uuid`  | pk                                                             |
+| `name`          | `text`  | "Cypress Bend"                                                 |
+| `city`          | `text`  | "Carmel-by-the-Sea, CA"                                        |
+| `geojson_holes` | `jsonb` | `FeatureCollection` of 18 green polygons; used for geofencing  |
+
+### `weather_snapshots`
+
+| column          | type          | notes                          |
+| --------------- | ------------- | ------------------------------ |
+| `id`            | `uuid`        | pk                             |
+| `course_id`     | `uuid`        | fk → `courses.id`              |
+| `t`             | `timestamptz` | snapshot or forecast time      |
+| `is_forecast`   | `boolean`     | `false` = observed, `true` = NOAA forecast row |
+| `temp_f`        | `numeric`     |                                |
+| `humidity_pct`  | `numeric`     |                                |
+| `precip_mm`     | `numeric`     | last-hour for observed, hourly for forecast |
+| `wind_mph`      | `numeric`     |                                |
+
+### `vwc_predictions`
+
+| column          | type          | notes                                  |
+| --------------- | ------------- | -------------------------------------- |
+| `id`            | `uuid`        | pk                                     |
+| `course_id`     | `uuid`        | fk                                     |
+| `hole`          | `int`         | 1..18                                  |
+| `t_target`      | `timestamptz` | predicted-for time (1–7 days out)      |
+| `predicted_vwc` | `numeric`     |                                        |
+| `model_version` | `text`        | bookkeeping for retraining (`'linreg-v1'`, …) |
+| `generated_at`  | `timestamptz` | default `now()`                        |
+
+### `users` (stretch — see §4.6)
+
+Supabase auth's built-in `auth.users` plus a `profiles` table with `initials`, `display_name`, and a `memberships` join table to courses. Not in the MVP cut.
 
 ---
 

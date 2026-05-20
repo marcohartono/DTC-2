@@ -9,9 +9,11 @@ Soil-moisture tracker for golf-course greenkeepers. Vite + React + TypeScript, m
 | Build | Vite 5 |
 | UI | React 18 + TypeScript (strict) |
 | Styling | Plain CSS with design tokens (`src/styles/styles.css`) |
-| State | React Context (`ReadingsContext`) — in-memory for now |
-| Data | Seeded mock readings (`src/lib/mockData.ts`) |
-| Planned backend | Supabase (auth, `readings` table, realtime, offline outbox) |
+| State | React Context (`ReadingsContext`) |
+| Data | **Supabase (Postgres) — primary store.** No local DB. Mock readings used only when offline-dev seeding is enabled. |
+| Backend | **Supabase**: Postgres, Row Level Security, Storage (TDR photos), Edge Functions for the weather/prediction job. |
+| AI | **OpenAI Vision** (`gpt-4o-mini`) reads TDR screen photos into VWC values. |
+| Weather | **NOAA API** for current conditions + a lightweight regression model for 7-day VWC forecasts. |
 
 ## Develop
 
@@ -31,22 +33,29 @@ src/
 ├── App.tsx                 # shell + provider wiring
 ├── types.ts                # Reading, Course, Hole, Tab, …
 ├── context/
-│   └── ReadingsContext.tsx # readings + addReading
+│   └── ReadingsContext.tsx # readings + addReading, hydrates from IndexedDB
 ├── lib/
-│   ├── mockData.ts         # COURSE + seeded readings
+│   ├── mockData.ts         # COURSE + seeded readings (dev only)
 │   ├── moisture.ts         # moistureColor / moistureBand / isCritical
-│   └── time.ts             # fmtTime / fmtTimeShort
+│   ├── time.ts             # fmtTime / fmtTimeShort
+│   ├── gps.ts              # useGps() — real watchPosition + simulation fallback
+│   ├── db.ts               # IndexedDB store (slated for removal — see Roadmap)
+│   ├── csv.ts              # readingsToCsv, downloadCsv
+│   └── storage.ts          # localStorage tech-id helpers
 ├── components/
 │   ├── icons.tsx
 │   ├── TopBar.tsx
 │   ├── TabBar.tsx
 │   ├── Toast.tsx
 │   ├── CourseHeatmap.tsx
-│   └── TrendChart.tsx
+│   ├── TrendChart.tsx
+│   ├── TechPicker.tsx
+│   ├── PositionPill.tsx    # scheduled for removal (see Roadmap)
+│   └── ErrorBoundary.tsx
 ├── screens/
 │   ├── CaptureScreen.tsx
 │   ├── AnalysisScreen.tsx
-│   └── HistoryScreen.tsx   # placeholder for Phase 2
+│   └── HistoryScreen.tsx
 └── styles/
     └── styles.css
 ```
@@ -56,44 +65,57 @@ The old in-browser-Babel prototype (`app.jsx`, `capture.jsx`, `analysis.jsx`, `d
 - On phones (`< 600px`): full viewport, sticky top bar, fixed tab bar, respects safe-area insets.
 - On desktop (`≥ 600px`): the app is centred in a 440-px-wide phone-shaped column on a dark stage.
 
+## Backend (Supabase)
+
+A single Postgres database holds all readings. Schema lives in `supabase/migrations/` (to be added).
+
+**Tables**
+
+- `readings` — `id, course_id, hole, vwc_value, phase, t, lat, lon, tech, photo_url, created_at`
+- `courses` — `id, name, city, geojson_holes` (green polygons used for geofencing)
+- `weather_snapshots` — `course_id, t, temp_f, humidity_pct, precip_mm, wind_mph` (hourly NOAA pulls)
+- `vwc_predictions` — `course_id, hole, t_target, predicted_vwc, model_version`
+- `users` — Supabase auth users (stretch goal)
+
+**Edge Functions**
+
+- `analyze-tdr-photo` — accepts an image upload, calls OpenAI Vision, returns the parsed VWC number.
+- `pull-weather` — hourly cron, fetches NOAA conditions for the course's lat/lon, writes `weather_snapshots`.
+- `predict-vwc` — nightly job, fits a lightweight regression on recent readings + forecast weather, writes 7 days of predictions per hole.
+
+**Env vars**
+
+```
+VITE_SUPABASE_URL=...
+VITE_SUPABASE_ANON_KEY=...
+OPENAI_API_KEY=...        # only read by the Edge Function, not the client
+```
+
 ## Roadmap
 
-### Phase 0 — Revamp ✅ *done*
+### ✅ Shipped (prototype baseline)
 - Vite + React 18 + TypeScript scaffold.
-- Drop Babel-in-browser and the iOS bezel; ship a responsive phone-first shell.
-- Port every existing feature (Capture flow, Heatmap / Trends / Readings modes, toast, mock seed) to typed React components.
-- Split helpers (`moistureColor`, `moistureBand`, `fmtTime`) into named exports.
-- Centralise reading state in `ReadingsContext`.
+- Real GPS via `navigator.geolocation.watchPosition` with simulation fallback (`src/lib/gps.ts`).
+- IndexedDB persistence (`src/lib/db.ts`) — **will be removed when Supabase lands.**
+- Tech identity picker, persisted in localStorage (`src/components/TechPicker.tsx`, `src/lib/storage.ts`).
+- CSV export from Analysis and History screens (`src/lib/csv.ts`).
+- History tab — reverse-time, tech-filterable feed (`src/screens/HistoryScreen.tsx`).
+- Error boundary around the shell (`src/components/ErrorBoundary.tsx`).
+- Heatmap, Trends, Readings analysis modes (`src/screens/AnalysisScreen.tsx`).
 
-### Phase 1 — Production prototype *(next)*
-Roughly in the order I'd ship them. Each item maps to a SPEC §4 entry.
+### 🎯 MVP — getting past the demo
 
-1. **Persistence — IndexedDB.** Add `idb` + a `readingsStore` module behind `ReadingsContext`. Hydrate state on mount, write-through on `addReading`. Reading gets `v: 1` for forward-compatible migrations.
-2. **Position-aware capture.** Add a 3-way pill (`front` / `middle` / `back`) under the hole picker in `CaptureScreen`. The `Reading` shape already carries `pos`.
-3. **Tech identity.** First-run picker that writes `tech` to `localStorage`; replace the hard-coded `'JM'` in `App.tsx` and `CaptureScreen.tsx`.
-4. **CSV export.** Wire the existing `⬇ export csv` button in `AnalysisScreen`. Build a `text/csv` blob from the filtered readings, trigger a download named `turfiq_[course]_[range].csv`. Columns: `timestamp_iso, hole, par, value_vwc, phase, position, tech, lat, lon`.
-5. **History tab.** Replace `HistoryScreen` stub with a chronological feed (reverse-time), filterable by tech and date range. Tapping a row jumps to that hole in Analysis.
-6. **Live GPS.** Swap the simulated `setInterval` for `navigator.geolocation.watchPosition()`. Surface real `accuracy` in the `gps-pill` in `TopBar`. Handle permission denial gracefully.
-7. **Error boundary** around `Shell` so a render error doesn't blank the whole frame.
+1. **Supabase as source of truth.** Drop IndexedDB, move all readings to Postgres. Realtime subscriptions so a second tech's capture appears live.
+2. **Geofencing.** Auto-resolve the current hole from GPS coordinates and the course's hole polygons. Manual hole picker stays as the fallback when GPS accuracy is poor (worse than ~10 m).
+3. **Photo-first capture.** Primary entry path: snap a photo of the TDR screen → OpenAI Vision parses the VWC number → user confirms or edits. Manual numeric entry stays as a fallback toggle.
+4. **Remove position pill.** The `front` / `middle` / `back` input is cut from the Capture screen and the `pos` field is dropped from the data model.
+5. **Weather + 7-day prediction.** Hourly NOAA pull. A lightweight regression model predicts VWC for the next 7 days per green; overlay on heatmap and trends.
 
-### Phase 2 — Offline-first PWA
-8. **Manifest + icons** (`public/manifest.json`, app icons in `public/icons/`).
-9. **Service worker** via `vite-plugin-pwa` — precache app shell, navigation fallback.
-10. **Outbox pattern.** Captures made while offline are queued in IndexedDB and flushed when the network returns. The CSV-shaped record is the wire format.
-11. **Install prompt** on first run (not Safari's Share menu).
-
-### Phase 3 — Supabase backend
-12. **Schema.** `courses`, `holes(course_id)`, `users(id, initials)`, `readings(course_id, hole, value, t, phase, pos, tech_id, lat, lon, v)`. RLS so each course is scoped.
-13. **Auth.** Supabase magic-link; course picker on sign-in.
-14. **Sync.** Append-only readings; last-write-wins is sufficient. Realtime subscribe to `readings` so a second tech's capture appears live.
-15. **Push alerts.** Edge function on `readings` insert: if value crosses critical band (`< 12` or `> 26`), push to subscribed devices.
-
-### Phase 4 — Exploratory
-16. Bluetooth TDR pairing (Spectrum TDR-350) → auto-fill the VWC value.
-17. Multi-course superintendent view.
-18. Per-green (or per-region) optimal-band targets.
-19. Weather overlay (NWS or paid weather API).
-20. Irrigation-plan suggestions: today's heatmap vs. schedule → "skip 12, double 3".
+### 🌱 Stretch
+- **Authentication** — Supabase magic-link, multi-user accounts, per-account readings.
+- TDR Bluetooth pairing (Spectrum TDR-350) to auto-fill VWC.
+- Multi-course superintendent view.
+- Irrigation-plan suggestions driven off the prediction model.
 
 ## Deploy to Vercel
 
@@ -114,4 +136,4 @@ After deploying, open the URL on your phone:
 - **iOS:** Share → Add to Home Screen. Launches full-screen.
 - **Android:** Chrome menu → Install app / Add to Home Screen.
 
-Once Phase 2 ships the service worker + manifest, this becomes a real installable PWA.
+A future pass will add a service worker + manifest to make this a real installable PWA — not on the MVP punch-list yet.
