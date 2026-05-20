@@ -11,7 +11,7 @@
 
 TurfIQ is a soil-moisture tracker built for golf-course greenkeepers — the field technicians and assistant superintendents who walk a course with a TDR (time-domain reflectometry) probe, push it into each green, and record the volumetric water content (VWC %). Today that data lives on clipboards, in spreadsheets, or in the probe's own offline log. TurfIQ replaces that with a phone-first capture flow plus an analysis view that shows the whole course as a heatmap and each green as a trend line.
 
-The current build is a **client-only static prototype** — no server, no auth, no database. It renders as a fixed 390×844 iPhone mockup in a dark stage frame (`index.html`) and uses React + Babel loaded from a CDN with mock data seeded in JavaScript. The README explicitly positions it as "a high-fidelity prototype" and lists the work needed before field testing.
+The current build is a **client-only Vite + React + TypeScript app** with readings persisted in IndexedDB. There is no server or auth yet. The layout is fluid (full viewport on phones, centred 440 px column on desktop). The MVP push — locked at the 2026-05-20 meeting — moves the data layer to Supabase, adds photo-first TDR capture via OpenAI Vision, geofences hole detection from GPS, and overlays a 7-day VWC forecast driven by NOAA weather (see §4).
 
 ### Primary jobs-to-be-done
 
@@ -32,11 +32,11 @@ The data and UI assume a small, well-known team of two-to-four people working a 
 
 | Role | Behaviour the app supports |
 |---|---|
-| Greenkeeper / field tech | Captures readings (most usage). Identified by 2-letter initials — seeded as `JM`, `AR`, `CH`. |
+| Greenkeeper / field tech | Captures readings (most usage). Identified by 2–4 letter initials chosen at first run via the tech picker. |
 | Assistant superintendent | Reviews analysis view, decides where to water. |
-| Superintendent | Glances at the heatmap, exports CSV for records (intended). |
+| Superintendent | Glances at the heatmap, exports CSV for records. |
 
-The top bar hard-codes `JM · Cypress Bend` as the operator in the Analysis view, which is fine for a one-course demo but is the first thing that has to become dynamic.
+The top bar shows the picked tech initials alongside the course name (currently a singleton, `Cypress Bend`). Multi-course support is gated on the stretch auth work in §4.6.
 
 ---
 
