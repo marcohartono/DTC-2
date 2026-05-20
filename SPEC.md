@@ -300,79 +300,73 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 
 ## 7. Architecture & technical notes
 
-| File | Role |
+| Path | Role |
 |---|---|
-| `index.html` | Loads fonts, React 18 UMD, Babel standalone, all JSX files, then renders the `Mount` stage that frames the app in an `IOSDevice` with two side captions. |
-| `styles.css` | All design tokens and component CSS. ~1260 lines. No CSS modules / Tailwind. |
-| `data.js` | Course definition and seeded readings. Helpers attached to `window`. |
-| `ios-frame.jsx` | iOS bezel + reusable iOS 26 components. |
-| `capture.jsx` | Capture screen. |
-| `analysis.jsx` | Analysis screen (heatmap, trends, readings table). |
-| `app.jsx` | App shell, tabs, toast. |
-| `package.json` | Just declares `npx serve .` as `dev`/`start`. |
-| `vercel.json` | Cache + clean-URL config for static deploy. |
+| `src/main.tsx`, `src/App.tsx` | Entry + shell. Wires `ReadingsContext`, `ErrorBoundary`, top bar, tab bar, toast. |
+| `src/types.ts` | `Reading`, `Course`, `Hole`, `Tab`, `Phase`, `Position` (Position to be removed per §4.4). |
+| `src/context/ReadingsContext.tsx` | Readings state. Currently hydrates from IndexedDB; in MVP will switch to Supabase client + realtime subscription. |
+| `src/lib/db.ts` | IndexedDB wrapper (`idb`). Slated for removal. |
+| `src/lib/gps.ts` | `useGps()` — real `watchPosition` with simulation fallback. |
+| `src/lib/csv.ts` | `readingsToCsv`, `downloadCsv`, `csvFilename`. |
+| `src/lib/storage.ts` | localStorage helpers for tech id. |
+| `src/lib/mockData.ts` | Course definition + seeded readings (dev seeding only). |
+| `src/lib/moisture.ts` | `moistureColor`, `moistureBand`, `isCritical`. |
+| `src/screens/CaptureScreen.tsx` | Capture flow. |
+| `src/screens/AnalysisScreen.tsx` | Heatmap / Trends / Readings. |
+| `src/screens/HistoryScreen.tsx` | Chronological feed. |
+| `src/components/*` | TopBar, TabBar, Toast, CourseHeatmap, TrendChart, TechPicker, PositionPill (to be removed), ErrorBoundary, icons. |
+| `src/styles/styles.css` | All design tokens and component CSS. ~1225 lines. No CSS modules / Tailwind. |
+| `vite.config.ts`, `tsconfig*.json` | Build + strict TS. |
+| `vercel.json` | Cache headers + clean URLs for the static deploy. |
+| `supabase/migrations/` *(to be added)* | SQL migrations for the schema in §5. |
+| `supabase/functions/` *(to be added)* | Edge Functions: `analyze-tdr-photo`, `pull-weather`, `predict-vwc`. |
 
-**Build / runtime constraints:**
+**Runtime characteristics**
 
-- No bundler. JSX is transpiled in the browser by Babel standalone — fine for prototyping, **not** production. Replacing this with Vite or esbuild is a prerequisite for shipping.
-- React, ReactDOM, and Babel are pinned to specific UMD URLs with SRI hashes.
-- All component state is local; there is no global store. Readings flow from `App` down to both screens.
-- All sizes are stage-dependent: the index stages the app at exactly 390×844, so internal layout is built to that fixed viewport, not to a fluid responsive grid.
+- Vite + strict TypeScript. No Babel-in-browser. `npm run build` runs `tsc -b && vite build`.
+- React 18, `idb@8` for the (soon-to-go) IndexedDB layer. No state-management library; `ReadingsContext` is the single store.
+- Layout is fluid: full viewport on phones, centred 440 px column on desktop. No fixed iPhone frame.
 
-**Risks to address before field use:**
+**Risks to address during the MVP push**
 
-1. In-browser Babel is slow on first load and blocks rendering — replace with a real build step.
-2. No persistence — any captured reading is lost on refresh.
-3. No error boundaries; a thrown render error blanks the whole frame.
-4. GPS is simulated; real `watchPosition` requires HTTPS and a user permission grant that the current shell does not handle.
-5. The font CDN (Google Fonts) is a runtime dependency and a privacy footprint.
+1. **Network dependence** — once Supabase replaces IndexedDB, a green that's out of cell range has no fallback. An offline outbox is a stretch follow-up; in the meantime the UI must surface failed writes loudly.
+2. **OpenAI Vision cost ceiling** — the Edge Function should rate-limit per course/day so a stuck client can't burn a budget overnight.
+3. **Photo PII** — TDR photos may incidentally capture turf/shoes/people. Storage bucket is private; signed URLs only.
+4. **NOAA reliability** — outages or rate limits will leave forecasts stale. The `predict-vwc` job should degrade gracefully (skip prediction, not error).
+5. **Font CDN (Google Fonts)** is still a runtime dependency and a privacy footprint.
 
 ---
 
-## 8. Roadmap (proposed)
+## 8. Roadmap
 
-Phased plan synthesised from §3 and §4. Sequencing prioritises field-readiness over polish.
+Canonical roadmap lives in [README.md → Roadmap](./README.md#roadmap). Summary:
 
-**Phase 1 — Production prototype (1–2 weeks)**
-
-1. Add a Vite (or equivalent) build, remove Babel-in-browser.
-2. Wire `navigator.geolocation.watchPosition()` and surface real accuracy.
-3. Persist readings to IndexedDB; add a schema version field.
-4. Implement the CSV export button.
-5. Add the position pill (front/middle/back) back into the capture flow.
-6. Replace the hard-coded `JM` tech identifier with a local "Who are you?" picker.
-
-**Phase 2 — Field-tested PWA (2–3 weeks)**
-
-7. `manifest.json` + service worker, offline app shell, install prompt.
-8. Outbox pattern: queue captures while offline, sync when reachable.
-9. Real History tab (chronological, filterable by tech and date).
-10. Error boundary + telemetry (Sentry or similar).
-
-**Phase 3 — Multi-tech (4–6 weeks)**
-
-11. Supabase project with `courses`, `holes`, `users`, `readings`.
-12. Magic-link auth, course selector, per-tech feeds.
-13. Conflict-free sync (last-write-wins is probably sufficient — captures are append-only).
-14. Push notifications on critical readings.
-
-**Phase 4 — Beyond (exploratory)**
-
-15. Bluetooth TDR pairing (Spectrum TDR-350).
-16. Multi-course superintendent view.
-17. Irrigation-plan suggestions: compare today's heatmap against the schedule and surface "skip green 12, double green 3" recommendations.
-18. Weather overlay — pull NWS or a paid weather API for the course location.
+- **✅ Shipped** — Vite/React/TS scaffold, real GPS, IndexedDB (about to be removed), tech picker, CSV export, History tab, error boundary, Heatmap/Trends/Readings analysis.
+- **🎯 MVP** — Supabase as source of truth (§4.1), geofencing (§4.2), photo-first capture via OpenAI Vision (§4.3), remove the position pill (§4.4), weather + 7-day VWC prediction (§4.5).
+- **🌱 Stretch** — magic-link auth (§4.6), TDR Bluetooth pairing, multi-course view, irrigation-plan suggestions, offline outbox.
 
 ---
 
 ## 9. Open questions
 
-- **Course onboarding.** How does a real customer get their 18-hole layout into the app? Trace from satellite imagery? Manual entry of green/tee coordinates? A "tap to drop pins on a map" wizard?
-- **Optimal band per course.** The hard-coded 14–22 % optimal range is a generic USGA-spec putting-green target. Superintendents will want to set per-green (or at least per-region) targets — bermudagrass on a desert course needs a different envelope than poa annua on a temperate links.
-- **Multiple probes per green.** The current model is one reading per probe-push. Some workflows take 3–5 pokes per green and average them. Does TurfIQ aggregate, or store each one and average on read?
-- **Permission model.** When techs share a course, can everyone see everyone's readings? Edit them? Delete them?
-- **Pricing / packaging.** Free for a single tech, paid for a team? Per-course license? Out of scope for the spec but it will shape the auth design.
+### Resolved at the 2026-05-20 meeting
+
+- ~~**Course onboarding.**~~ Resolved: each course stores a `geojson_holes` `FeatureCollection`, traced once at onboarding from satellite imagery. The same polygons drive geofencing (§4.2).
+- ~~**Multiple probes per green.**~~ Out of scope for MVP — one reading per submit. Revisit if field testers ask for it.
+- ~~**Permission model.**~~ Punted to the auth stretch goal (§4.6). MVP assumes a single shared course where every tech sees every reading.
+
+### Still open
+
+- **Optimal band per course.** The hard-coded 14–22 % range is generic USGA. Superintendents will eventually want per-green targets (bermudagrass on a desert course vs. poa annua on temperate links). Acceptable to ship MVP with the global range.
+- **Pricing / packaging.** Free for a single tech, paid for a team? Per-course license? Will shape the auth design when it lands.
+
+### New from the meeting
+
+- **Weather API tier.** Start with NOAA free, or stand up Open-Meteo as a backup? NOAA's rate limits may bite at hourly cadence across multiple courses.
+- **Prediction model class.** Start with linear regression — it's enough to ship and easy to explain. Move to gradient-boosted (xgboost) once we have >2 weeks of real reading data per course.
+- **OpenAI Vision budget.** Set a per-day per-course spend ceiling in the Edge Function. Default cap?
+- **Photo retention.** How long do TDR photos stick around in Storage — forever, 90 days, until the next reading on the same hole? Affects privacy disclosure copy.
 
 ---
 
-*Generated from a direct audit of the `DTC-2` repository on 2026-05-15. Every behaviour in §3 has been verified against the JSX/CSS source; §4 features are inferred from the README's "Next steps" list, the existing data model, and dormant UI affordances (the History tab, the inert CSV button, the unused position-pill stylesheet block).*
+*Updated 2026-05-20 after the team scoping meeting. Sections 3, 4, 5, 7, 8, 9 reflect the new MVP plan: Supabase as primary store, photo-first capture via OpenAI Vision, geofenced hole detection, weather + 7-day VWC predictions, and the removal of the front/middle/back position pill.*
