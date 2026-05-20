@@ -1,32 +1,25 @@
 import { useEffect, useState, type ChangeEvent } from 'react';
-import type { Phase, Reading } from '../types';
+import type { Phase, Position, Reading } from '../types';
 import { COURSE } from '../lib/mockData';
 import { moistureBand, moistureColor } from '../lib/moisture';
 import { fmtTime } from '../lib/time';
+import { useGps } from '../lib/gps';
 import { PhaseAfterIcon, PhaseBeforeIcon } from '../components/icons';
+import { PositionPill } from '../components/PositionPill';
 
 interface Props {
   onLog: (r: Reading) => void;
   recent: Reading[];
+  tech: string;
 }
 
-export function CaptureScreen({ onLog, recent }: Props) {
+export function CaptureScreen({ onLog, recent, tech }: Props) {
   const [value, setValue] = useState<number | ''>(18.0);
   const [hole, setHole] = useState(7);
   const [phase, setPhase] = useState<Phase>('before');
-  const [coords, setCoords] = useState({ lat: 36.5547, lon: -121.9231, acc: 2.4 });
+  const [pos, setPos] = useState<Position>('middle');
   const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const id = setInterval(() => {
-      setCoords((c) => ({
-        lat: c.lat + (Math.random() - 0.5) * 0.00002,
-        lon: c.lon + (Math.random() - 0.5) * 0.00002,
-        acc: 1.8 + Math.random() * 1.4,
-      }));
-    }, 1500);
-    return () => clearInterval(id);
-  }, []);
+  const gps = useGps();
 
   useEffect(() => {
     const id = setInterval(() => setNow(new Date()), 1000);
@@ -53,10 +46,10 @@ export function CaptureScreen({ onLog, recent }: Props) {
       value: Math.round(v * 10) / 10,
       t: Date.now(),
       phase,
-      pos: 'middle',
-      tech: 'JM',
-      lat: coords.lat,
-      lon: coords.lon,
+      pos,
+      tech,
+      lat: gps.lat,
+      lon: gps.lon,
       v: 1,
     });
     setValue(18.0);
@@ -66,6 +59,14 @@ export function CaptureScreen({ onLog, recent }: Props) {
   const timeStr = now.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: false });
   const meta = COURSE.holes[hole - 1]!;
   const last = recent[0];
+
+  const accLabel =
+    gps.source === 'pending'
+      ? 'Locking…'
+      : gps.acc != null
+        ? `±${gps.acc.toFixed(1)}m`
+        : 'Unknown';
+  const sourceLabel = gps.source === 'real' ? 'Live' : gps.source === 'simulated' ? 'Sim' : '—';
 
   return (
     <div className="capture-simple">
@@ -117,6 +118,14 @@ export function CaptureScreen({ onLog, recent }: Props) {
         </div>
       </div>
 
+      <div className="cs-section">
+        <div className="cs-label">
+          <span>Probe position</span>
+          <span className="cs-meta">{pos}</span>
+        </div>
+        <PositionPill value={pos} onChange={setPos} />
+      </div>
+
       <div className="cs-section cs-moisture">
         <div className="cs-label">
           <span>Volumetric water content</span>
@@ -164,7 +173,7 @@ export function CaptureScreen({ onLog, recent }: Props) {
 
       <div className="cs-auto">
         <span className="cs-auto-dot" />
-        Auto · {coords.lat.toFixed(4)}°N {Math.abs(coords.lon).toFixed(4)}°W · {timeStr}
+        {sourceLabel} · {gps.lat.toFixed(4)}°N {Math.abs(gps.lon).toFixed(4)}°W · {accLabel} · {timeStr}
       </div>
 
       <button className="cta cs-cta" onClick={onSave} disabled={!canLog}>

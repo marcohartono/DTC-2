@@ -1,17 +1,19 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { AnalysisRange, AnalysisView, Reading } from '../types';
 import { COURSE } from '../lib/mockData';
 import { moistureColor } from '../lib/moisture';
 import { fmtTime, fmtTimeShort } from '../lib/time';
 import { CourseHeatmap } from '../components/CourseHeatmap';
 import { TrendChart } from '../components/TrendChart';
+import { csvFilename, downloadCsv, readingsToCsv } from '../lib/csv';
 
 interface Props {
   readings: Reading[];
+  selectedHole: number;
+  onSelectHole: (hole: number) => void;
 }
 
-export function AnalysisScreen({ readings }: Props) {
-  const [selectedHole, setSelectedHole] = useState(7);
+export function AnalysisScreen({ readings, selectedHole, onSelectHole }: Props) {
   const [range, setRange] = useState<AnalysisRange>(7);
   const [view, setView] = useState<AnalysisView>('heatmap');
 
@@ -75,8 +77,15 @@ export function AnalysisScreen({ readings }: Props) {
     return out;
   }, [readings, cutoff]);
 
+  const onExport = useCallback(() => {
+    const inRange = readings.filter((r) => r.t >= cutoff).sort((a, b) => a.t - b.t);
+    if (inRange.length === 0) return;
+    const csv = readingsToCsv(inRange);
+    downloadCsv(csvFilename(COURSE.name, range), csv);
+  }, [readings, cutoff, range]);
+
   return (
-    <div>
+    <div className="analysis">
       <div className="analysis-head">
         <div className="sub">{COURSE.name} · {COURSE.city}</div>
         <h1>Field <i>analysis</i></h1>
@@ -87,7 +96,9 @@ export function AnalysisScreen({ readings }: Props) {
             </button>
           ))}
           <div style={{ flex: 1 }} />
-          <button style={{ borderColor: 'transparent', color: 'var(--muted)' }}>⬇ export csv</button>
+          <button className="export-btn" onClick={onExport} disabled={readings.length === 0}>
+            ⬇ export csv
+          </button>
         </div>
       </div>
 
@@ -98,7 +109,7 @@ export function AnalysisScreen({ readings }: Props) {
       </div>
 
       {view === 'heatmap' && (
-        <>
+        <div className="analysis-grid">
           <div className="heatmap-wrap">
             <div className="hm-head">
               <span className="t">Course moisture · last {range === 1 ? '24h' : range + ' days'}</span>
@@ -108,7 +119,7 @@ export function AnalysisScreen({ readings }: Props) {
               readings={readings}
               range={range}
               selectedHole={selectedHole}
-              onSelectHole={setSelectedHole}
+              onSelectHole={onSelectHole}
             />
             <div className="legend">
               <span>4%</span>
@@ -160,20 +171,19 @@ export function AnalysisScreen({ readings }: Props) {
               </div>
             )}
           </div>
-        </>
+        </div>
       )}
 
       {view === 'trends' && (
-        <div style={{ padding: '0 20px' }}>
+        <div className="trends-grid">
           {COURSE.holes.map((h) => {
             const v = avgByHole[h.n];
             const critical = v != null && (v < 12 || v > 26);
             return (
               <div
                 key={h.n}
-                className="hole-detail"
-                style={{ margin: '12px 0 0', padding: '12px 14px' }}
-                onClick={() => { setSelectedHole(h.n); setView('heatmap'); }}
+                className="hole-detail trend-card"
+                onClick={() => { onSelectHole(h.n); setView('heatmap'); }}
               >
                 <div className="hd-head" style={{ alignItems: 'center', marginBottom: 4 }}>
                   <div className="l">
@@ -203,7 +213,7 @@ export function AnalysisScreen({ readings }: Props) {
                 <button
                   key={h.n}
                   className={selectedHole === h.n ? 'sel' : ''}
-                  onClick={() => setSelectedHole(h.n)}
+                  onClick={() => onSelectHole(h.n)}
                 >
                   {h.n}
                   <span className="dot" style={{ background: v != null ? moistureColor(v) : 'var(--bone-3)' }} />
@@ -216,19 +226,7 @@ export function AnalysisScreen({ readings }: Props) {
             <small>{tableRows.length} entries</small>
           </h3>
           {tableRows.length === 0 && (
-            <div
-              style={{
-                padding: '24px 0',
-                textAlign: 'center',
-                color: 'var(--muted)',
-                fontFamily: 'var(--mono)',
-                fontSize: 11,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-              }}
-            >
-              No readings in range
-            </div>
+            <div className="empty-state">No readings in range</div>
           )}
           {tableRows.map((r, i) => (
             <div className="t-row" key={i}>
