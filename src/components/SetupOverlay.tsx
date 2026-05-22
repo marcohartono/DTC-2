@@ -6,10 +6,10 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { COURSE } from '../lib/mockData';
 import { useCourse } from '../context/CourseContext';
 import { useReadings } from '../context/ReadingsContext';
+import { useGps } from '../lib/gps';
 import type { HoleFeatureCollection } from '../lib/geofence';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN;
-const COURSE_CENTER: [number, number] = [-121.9231, 36.5547];
 
 interface Props {
   onClose: () => void;
@@ -18,6 +18,7 @@ interface Props {
 export function SetupOverlay({ onClose }: Props) {
   const { geofences, saveGeofences } = useCourse();
   const { readings, loadDemoData, clearAllReadings } = useReadings();
+  const gps = useGps();
 
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<mapboxgl.Map | null>(null);
@@ -25,6 +26,10 @@ export function SetupOverlay({ onClose }: Props) {
   const drawRef = useRef<any>(null);
   const activeHoleRef = useRef(1);
   const geofencesRef = useRef<HoleFeatureCollection>(geofences);
+  // Pre-resolve center (the Winnetka Golf Club fallback); we fly to the
+  // device's real position once GPS resolves.
+  const initialCenterRef = useRef<[number, number]>([gps.lon, gps.lat]);
+  const didAutoCenterRef = useRef(false);
 
   const [activeHole, setActiveHole] = useState(1);
   const [definedHoles, setDefinedHoles] = useState<number[]>([]);
@@ -59,8 +64,8 @@ export function SetupOverlay({ onClose }: Props) {
     const map = new mapboxgl.Map({
       container,
       style: 'mapbox://styles/mapbox/satellite-streets-v12',
-      center: COURSE_CENTER,
-      zoom: 15,
+      center: initialCenterRef.current,
+      zoom: 16,
       attributionControl: false,
     });
     mapRef.current = map;
@@ -73,12 +78,21 @@ export function SetupOverlay({ onClose }: Props) {
     map.addControl(draw as unknown as mapboxgl.IControl);
     map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
 
+    const geolocate = new mapboxgl.GeolocateControl({
+      positionOptions: { enableHighAccuracy: true },
+      trackUserLocation: true,
+      showUserHeading: true,
+    });
+    map.addControl(geolocate, 'top-right');
+
     map.on('load', () => {
       const fc = geofencesRef.current;
       if (fc.features.length) {
         draw.set(fc as any);
         refreshDefined();
       }
+      // Open on the greenkeeper's actual position so they can geofence in place.
+      geolocate.trigger();
     });
 
     const onCreate = (e: any) => {
@@ -106,6 +120,17 @@ export function SetupOverlay({ onClose }: Props) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Recenter on the greenkeeper's real position the moment GPS resolves —
+  // independent of GeolocateControl, whose trigger() can be blocked on some
+  // mobile browsers. Until then the map sits on the Winnetka Golf Club center.
+  useEffect(() => {
+    if (didAutoCenterRef.current || gps.source !== 'real') return;
+    const map = mapRef.current;
+    if (!map) return;
+    didAutoCenterRef.current = true;
+    map.flyTo({ center: [gps.lon, gps.lat], zoom: 17, duration: 1200 });
+  }, [gps.source, gps.lat, gps.lon]);
 
   const onSelectHole = (n: number) => {
     setActiveHole(n);

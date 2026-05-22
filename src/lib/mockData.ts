@@ -1,8 +1,8 @@
 import type { Course, Reading, Tech } from '../types';
 
 export const COURSE: Course = {
-  name: 'Cypress Bend',
-  city: 'Carmel-by-the-Sea, CA',
+  name: 'Winnetka Golf Course',
+  city: 'Evanston, IL',
   w: 360,
   h: 460,
   holes: [
@@ -80,8 +80,8 @@ export function makeReadings(): Reading[] {
           t,
           phase: 'before',
           tech: TECHS[Math.floor(r() * 3)]!,
-          lat: 36.5547 + (r() - 0.5) * 0.001,
-          lon: -121.923 + (r() - 0.5) * 0.001,
+          lat: 42.1091 + (r() - 0.5) * 0.001,
+          lon: -87.7591 + (r() - 0.5) * 0.001,
           v: 1,
         });
         if (k === count - 1) waterT = t + 30 * 60_000 + r() * 30 * 60_000;
@@ -96,8 +96,8 @@ export function makeReadings(): Reading[] {
           t: waterT,
           phase: 'after',
           tech: TECHS[Math.floor(r() * 3)]!,
-          lat: 36.5547 + (r() - 0.5) * 0.001,
-          lon: -121.923 + (r() - 0.5) * 0.001,
+          lat: 42.1091 + (r() - 0.5) * 0.001,
+          lon: -87.7591 + (r() - 0.5) * 0.001,
           v: 1,
         });
       }

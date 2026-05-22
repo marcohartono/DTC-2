@@ -125,7 +125,7 @@ export function CourseHeatmap({ readings, range, selectedHole, onSelectHole }: P
           fill="rgba(243,237,224,0.6)"
           letterSpacing="0.1em"
         >
-          CLBHS
+          WGC
         </text>
       </g>
 

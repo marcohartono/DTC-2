@@ -36,7 +36,7 @@ The data and UI assume a small, well-known team of two-to-four people working a 
 | Assistant superintendent | Reviews analysis view, decides where to water. |
 | Superintendent | Glances at the heatmap, exports CSV for records. |
 
-The top bar shows the picked tech initials alongside the course name (currently a singleton, `Cypress Bend`). Multi-course support is gated on the stretch auth work in §4.6.
+The top bar shows the picked tech initials alongside the course name (currently a singleton, `Winnetka Golf Course`). Multi-course support is gated on the stretch auth work in §4.6.
 
 ---
 
@@ -47,7 +47,7 @@ This section catalogues what is shipped in the codebase today. Every behaviour l
 ### 3.1 App shell (`src/App.tsx`)
 
 - Three-tab application: **Capture**, **Analysis**, **History** — all wired (History is no longer a stub).
-- Sticky top bar with the **TurfIQ** wordmark and contextual meta — a live GPS pill on Capture (real `accuracy` from `watchPosition`) and `{tech} · Cypress Bend · [date] · N READINGS TODAY` on Analysis. The tech badge is tappable to re-open the tech picker.
+- Sticky top bar with the **TurfIQ** wordmark and contextual meta — a live GPS pill on Capture (real `accuracy` from `watchPosition`) and `{tech} · Winnetka Golf Course · [date] · N READINGS TODAY` on Analysis. The tech badge is tappable to re-open the tech picker.
 - A "Reading saved" toast (`✓` glyph, mossy pill, 1.8 s auto-dismiss) confirms each capture.
 - Reading state lives in `ReadingsContext` (`src/context/ReadingsContext.tsx`) and is hydrated from IndexedDB on mount.
 - Error boundary (`src/components/ErrorBoundary.tsx`) wraps `Shell` so a render error doesn't blank the frame.
@@ -61,7 +61,7 @@ The capture flow is built around the question "What's the moisture on hole N?" r
 - **Hole picker**: a horizontally-scrolling strip of 18 numbered buttons. The selected hole shows its par and yardage in the section meta (`Par 4 · 412y`).
 - **VWC readout**: a giant editable serif number with a `%` unit. Range `0–40` enforced on input. The current value snaps to a colour swatch and a moisture band label (Critical dry → Critical wet, see §6.1).
 - **Slider**: a 0–40 range slider with a gradient track matching the moisture scale. The thumb is a paper-coloured pill with a moss border; the slider and the typed number are bound to the same `value`.
-- **Real GPS**: `useGps()` in `src/lib/gps.ts` calls `navigator.geolocation.watchPosition` with `enableHighAccuracy: true`; falls back to simulated jitter if permission is denied or the API is unavailable. The auto-stamp footer reads `{Live|Sim} · 36.5547°N 121.9230°W · ±{acc}m · HH:MM`.
+- **Real GPS**: `useGps()` in `src/lib/gps.ts` calls `navigator.geolocation.watchPosition` with `enableHighAccuracy: true`; falls back to simulated jitter if permission is denied or the API is unavailable. The auto-stamp footer reads `{Live|Sim} · 42.1083°N 87.7305°W · ±{acc}m · HH:MM`.
 - **Submit button**: "Submit reading →" — disabled until value > 0 and a hole is selected. On submit it prepends a reading to context, writes through to IndexedDB, fires the toast, and resets the value to 18.0.
 - **Last-reading caption**: under the CTA, "Last: hole N · X.X% · Y ago" using a relative-time formatter.
 - **Position pill** (`src/components/PositionPill.tsx`, mounted at `CaptureScreen.tsx:123`): three-way `front` / `middle` / `back` selector. **Scheduled for removal — see §4.4.**
@@ -70,15 +70,15 @@ The tech identifier is sourced from the tech picker (`src/components/TechPicker.
 
 ### 3.3 Analysis screen (`src/screens/AnalysisScreen.tsx`)
 
-A page header with `Cypress Bend · Carmel-by-the-Sea, CA` and a serif "Field analysis" title sits above a 24h / 7d / 30d range picker and a working `⬇ export csv` button (downloads `turfiq_[course]_[range]_[date].csv` via `src/lib/csv.ts`). A three-way mode toggle switches between Heatmap, Trends, and Readings.
+A page header with `Winnetka Golf Course · Evanston, IL` and a serif "Field analysis" title sits above a 24h / 7d / 30d range picker and a working `⬇ export csv` button (downloads `turfiq_[course]_[range]_[date].csv` via `src/lib/csv.ts`). A three-way mode toggle switches between Heatmap, Trends, and Readings.
 
 **Heatmap mode** is the default and the centerpiece:
 
-- A custom SVG course routing for Cypress Bend renders all 18 holes in a loose 18-stop loop on a 360×460 canvas. Each green is a circle; each tee is a small square; thin lines connect tee → green (fairways) and green → next tee (player path).
+- A custom SVG course routing for Winnetka Golf Course renders all 18 holes in a loose 18-stop loop on a 360×460 canvas. Each green is a circle; each tee is a small square; thin lines connect tee → green (fairways) and green → next tee (player path).
 - Each green's fill colour is the **average VWC over the selected range**, mapped through `moistureColor()`. Greens with no readings in range render as a muted bone outline.
 - Tapping a green selects it: a soft white halo appears and the VWC label floats above the circle.
 - Critical greens (avg < 12% or > 26%) get an animated pulsing ring drawn around them to flag attention.
-- A compass rose (north arrow with a terracotta tip) and a CLBHS clubhouse marker decorate the map corners. A faint turf-grid background pattern fills the rest.
+- A compass rose (north arrow with a terracotta tip) and a WGC clubhouse marker decorate the map corners. A faint turf-grid background pattern fills the rest.
 - A linear-gradient legend underneath labels `4%` → `34%`.
 
 **Hole detail card** (always visible under the heatmap):
@@ -221,8 +221,8 @@ The MVP backend is a single Postgres database. Schema migrations live in `supaba
 | column          | type    | notes                                                          |
 | --------------- | ------- | -------------------------------------------------------------- |
 | `id`            | `uuid`  | pk                                                             |
-| `name`          | `text`  | "Cypress Bend"                                                 |
-| `city`          | `text`  | "Carmel-by-the-Sea, CA"                                        |
+| `name`          | `text`  | "Winnetka Golf Course"                                                 |
+| `city`          | `text`  | "Evanston, IL"                                        |
 | `geojson_holes` | `jsonb` | `FeatureCollection` of 18 green polygons; used for geofencing  |
 
 ### `weather_snapshots`

@@ -9,8 +9,8 @@ export interface GpsState {
 }
 
 const FALLBACK: GpsState = {
-  lat: 36.5547,
-  lon: -121.9231,
+  lat: 42.1091,
+  lon: -87.7591,
   acc: 2.4,
   source: 'simulated',
 };
