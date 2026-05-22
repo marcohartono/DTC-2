@@ -1,4 +1,4 @@
-import type { Course, Position, Reading, Tech } from '../types';
+import type { Course, Reading, Tech } from '../types';
 
 export const COURSE: Course = {
   name: 'Cypress Bend',
@@ -35,7 +35,6 @@ function seededRand(seed: number): () => number {
   };
 }
 
-const POS: Position[] = ['front', 'middle', 'back'];
 const TECHS: Tech[] = ['JM', 'AR', 'CH'];
 
 export function makeReadings(): Reading[] {
@@ -80,7 +79,6 @@ export function makeReadings(): Reading[] {
           value: Math.round(value * 10) / 10,
           t,
           phase: 'before',
-          pos: POS[Math.floor(r() * 3)]!,
           tech: TECHS[Math.floor(r() * 3)]!,
           lat: 36.5547 + (r() - 0.5) * 0.001,
           lon: -121.923 + (r() - 0.5) * 0.001,
@@ -97,7 +95,6 @@ export function makeReadings(): Reading[] {
           value: Math.round(afterValue * 10) / 10,
           t: waterT,
           phase: 'after',
-          pos: POS[Math.floor(r() * 3)]!,
           tech: TECHS[Math.floor(r() * 3)]!,
           lat: 36.5547 + (r() - 0.5) * 0.001,
           lon: -121.923 + (r() - 0.5) * 0.001,

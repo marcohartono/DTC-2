@@ -236,7 +236,7 @@ export function AnalysisScreen({ readings, selectedHole, onSelectHole }: Props) 
                 <span className={'phase-pill ' + (r.phase || 'before')} style={{ marginRight: 6 }}>
                   {r.phase === 'after' ? '◆ after' : '● before'}
                 </span>
-                {r.lat.toFixed(5)}, {Math.abs(r.lon).toFixed(5)} · {r.pos} · {r.tech}
+                {r.lat.toFixed(5)}, {Math.abs(r.lon).toFixed(5)} · {r.tech}
               </div>
               <div className="v">
                 {r.value.toFixed(1)}

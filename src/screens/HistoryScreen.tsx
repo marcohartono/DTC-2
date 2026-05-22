@@ -78,7 +78,7 @@ export function HistoryScreen({ readings, onJumpToHole, currentTech }: Props) {
               <span className={'phase-pill ' + r.phase} style={{ marginRight: 6 }}>
                 {r.phase === 'after' ? '◆ after' : '● before'}
               </span>
-              {r.pos} · {r.tech}
+              {r.tech}
             </div>
             <div className="v">
               {r.value.toFixed(1)}<span className="vu">%</span>

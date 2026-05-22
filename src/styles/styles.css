@@ -271,33 +271,6 @@ body {
   border-color: var(--moss);
 }
 
-/* position pills */
-.pos-row {
-  display: flex;
-  gap: 6px;
-}
-.pos-row button {
-  flex: 1;
-  font-family: var(--mono);
-  font-size: 11px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  background: var(--bone);
-  border: 1px solid var(--bone-3);
-  color: var(--ink-2);
-  border-radius: 10px;
-  padding: 10px 0;
-  cursor: pointer;
-  transition: all 0.12s ease;
-  font-weight: 500;
-}
-.pos-row button:hover { background: var(--bone-2); }
-.pos-row button.sel {
-  background: var(--moss);
-  color: var(--bone);
-  border-color: var(--moss);
-}
-
 .cs-readout {
   display: flex;
   align-items: baseline;
@@ -1147,6 +1120,219 @@ body {
   cursor: pointer;
 }
 .btn-ghost:hover { background: var(--bone); }
+.btn-ghost.danger { color: var(--warn); border-color: rgba(194,99,45,0.4); }
+.btn-ghost.danger:hover { background: rgba(194,99,45,0.08); }
+
+/* ───────── Topbar settings button ───────── */
+.topbar-settings {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px;
+  flex-shrink: 0;
+  transition: color 0.12s ease, transform 0.12s ease;
+}
+.topbar-settings:hover { color: var(--ink); }
+.topbar-settings:active { transform: scale(0.92); }
+
+/* ───────── Capture: photo-first ───────── */
+.cs-photo-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--moss);
+  color: var(--bone);
+  border: 1px solid var(--moss);
+  border-radius: 14px;
+  padding: 16px;
+  font-family: var(--sans);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  margin-bottom: 12px;
+  transition: background 0.12s ease, transform 0.06s ease;
+}
+.cs-photo-btn:hover { background: var(--moss-2); }
+.cs-photo-btn:active { transform: scale(0.98); }
+.cs-photo-btn:disabled { opacity: 0.7; cursor: default; }
+.cs-photo-spin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: var(--bone);
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.cs-photo-err {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--warn);
+  margin-bottom: 8px;
+}
+.cs-manual-toggle {
+  background: none;
+  border: none;
+  color: var(--ink-2);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 8px 0 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.cs-manual-toggle:hover { color: var(--ink); }
+.cs-num::placeholder { color: var(--line-2); }
+
+/* ───────── Capture: geofence detect ───────── */
+.cs-detected {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--good);
+  background: rgba(74,122,58,0.12);
+  border: 1px solid rgba(74,122,58,0.3);
+  padding: 4px 10px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+}
+.cs-detected-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--good);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+.cs-detected-sub { color: var(--muted); }
+.cs-setup-link {
+  display: inline-block;
+  background: none;
+  border: none;
+  color: var(--info);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0 0 8px;
+}
+.cs-setup-link:hover { color: var(--ink); }
+
+/* ───────── Toast: error variant ───────── */
+.toast.error { background: var(--warn); }
+.toast.error .check.err {
+  background: var(--paper);
+  color: var(--warn);
+  font-weight: 700;
+}
+
+/* ───────── Setup overlay ───────── */
+.setup-veil {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 13, 10, 0.6);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  z-index: 120;
+}
+.setup-panel {
+  width: 100%;
+  max-width: 560px;
+  max-height: 92vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--paper);
+  border: 1px solid var(--bone-3);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+  overflow: hidden;
+}
+.setup-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 20px 22px 12px;
+  border-bottom: 1px solid var(--bone-3);
+}
+.setup-h {
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  margin: 4px 0 0;
+}
+.setup-h i { font-style: italic; color: var(--ink-2); }
+.setup-close {
+  background: var(--bone);
+  border: 1px solid var(--bone-3);
+  color: var(--ink-2);
+  border-radius: 999px;
+  width: 30px; height: 30px;
+  cursor: pointer;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.setup-close:hover { background: var(--bone-2); }
+.setup-body {
+  padding: 16px 22px 22px;
+  overflow-y: auto;
+}
+.setup-section { margin-bottom: 22px; }
+.setup-p {
+  margin: 8px 0 12px;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  line-height: 1.5;
+}
+.setup-strip { margin-bottom: 12px; }
+.cs-hole-btn.done {
+  border-color: var(--good);
+  box-shadow: inset 0 0 0 1px var(--good);
+}
+.cs-hole-btn.done.sel { box-shadow: none; }
+.setup-map {
+  width: 100%;
+  height: 340px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--bone-3);
+}
+.setup-map-err {
+  padding: 24px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--warn);
+  background: var(--bone);
+  border-radius: 12px;
+  border: 1px solid var(--bone-3);
+}
+.setup-save { margin-top: 12px; }
+.setup-demo-row { display: flex; gap: 8px; }
+.setup-msg {
+  margin-top: 4px;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+  text-align: center;
+}
 
 /* ───────── Error boundary ───────── */
 .error-screen {

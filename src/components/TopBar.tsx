@@ -11,6 +11,7 @@ interface Props {
   courseName: string;
   gps: GpsState;
   onTechClick: () => void;
+  onOpenSetup: () => void;
 }
 
 function GpsMeta({ gps }: { gps: GpsState }) {
@@ -28,7 +29,7 @@ function GpsMeta({ gps }: { gps: GpsState }) {
   );
 }
 
-export function TopBar({ tab, onTabChange, todayCount, dateStr, tech, courseName, gps, onTechClick }: Props) {
+export function TopBar({ tab, onTabChange, todayCount, dateStr, tech, courseName, gps, onTechClick, onOpenSetup }: Props) {
   return (
     <div className="topbar">
       <div className="topbar-row">
@@ -62,6 +63,10 @@ export function TopBar({ tab, onTabChange, todayCount, dateStr, tech, courseName
             </button>
           )}
         </div>
+
+        <button className="topbar-settings" onClick={onOpenSetup} title="Course setup" aria-label="Course setup">
+          ⚙
+        </button>
       </div>
     </div>
   );

@@ -1,16 +1,16 @@
 export type Phase = 'before' | 'after';
-export type Position = 'front' | 'middle' | 'back';
 export type Tech = string;
 
 export interface Reading {
+  id?: string;
   hole: number;
   value: number;
   t: number;
   phase: Phase;
-  pos: Position;
   tech: Tech;
   lat: number;
   lon: number;
+  photo_url?: string | null;
   v?: number;
 }
 
