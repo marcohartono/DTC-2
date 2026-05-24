@@ -9,21 +9,24 @@ Soil-moisture tracker for golf-course greenkeepers. Vite + React + TypeScript, m
 | Build | Vite 5 |
 | UI | React 18 + TypeScript (strict) |
 | Styling | Plain CSS with design tokens (`src/styles/styles.css`) |
-| State | React Context (`ReadingsContext`) |
-| Data | **Supabase (Postgres) — primary store.** No local DB. Mock readings used only when offline-dev seeding is enabled. |
-| Backend | **Supabase**: Postgres, Row Level Security, Storage (TDR photos), Edge Functions for the weather/prediction job. |
+| State | React Context (`ReadingsContext`, `CourseContext`) |
+| Data | **Supabase (Postgres) — primary store** with realtime. No local DB. Mock readings loaded on demand from the in-app setup panel. |
+| Backend | **Supabase**: Postgres + Row Level Security + realtime; an Edge Function (`analyze-tdr-photo`) calls OpenAI Vision. |
+| Maps | **Mapbox GL** + `mapbox-gl-draw` — satellite geofence editor for tracing the green polygons. |
 | AI | **OpenAI Vision** (`gpt-4o-mini`) reads TDR screen photos into VWC values. |
-| Weather | **NOAA API** for current conditions + a lightweight regression model for 7-day VWC forecasts. |
+| Weather | **NOAA API** + a lightweight regression for 7-day VWC forecasts *(planned — §4.5)*. |
 
 ## Develop
 
 ```bash
 npm install
-npm run dev       # http://localhost:5173
+npm run dev       # https://localhost:5173  (also https://<LAN-IP>:5173)
 npm run build     # tsc -b && vite build → dist/
 npm run preview   # serve the built bundle
 npm run typecheck # strict TS check, no emit
 ```
+
+The dev/preview server runs over **HTTPS** (self-signed, via `@vitejs/plugin-basic-ssl`) because `navigator.geolocation` only works in a secure context. To test on a phone, open the `Network:` `https://<LAN-IP>:5173` URL it prints (type the `https://` explicitly), accept the certificate warning once, and allow location.
 
 ## Project layout
 
@@ -33,13 +36,15 @@ src/
 ├── App.tsx                 # shell + provider wiring
 ├── types.ts                # Reading, Course, Hole, Tab, …
 ├── context/
-│   └── ReadingsContext.tsx # readings + addReading, hydrates from IndexedDB
+│   ├── ReadingsContext.tsx # readings via Supabase: select + realtime + addReading
+│   └── CourseContext.tsx   # loads the course + geofence polygons; saveGeofences()
 ├── lib/
-│   ├── mockData.ts         # COURSE + seeded readings (dev only)
+│   ├── supabase.ts         # Supabase client (VITE_SUPABASE_URL / _ANON_KEY)
+│   ├── geofence.ts         # point-in-polygon + detectHole() for GPS hole detection
+│   ├── mockData.ts         # COURSE + makeReadings() (demo data, loaded on demand)
 │   ├── moisture.ts         # moistureColor / moistureBand / isCritical
 │   ├── time.ts             # fmtTime / fmtTimeShort
 │   ├── gps.ts              # useGps() — real watchPosition + simulation fallback
-│   ├── db.ts               # IndexedDB store (slated for removal — see Roadmap)
 │   ├── csv.ts              # readingsToCsv, downloadCsv
 │   └── storage.ts          # localStorage tech-id helpers
 ├── components/
@@ -50,7 +55,7 @@ src/
 │   ├── CourseHeatmap.tsx
 │   ├── TrendChart.tsx
 │   ├── TechPicker.tsx
-│   ├── PositionPill.tsx    # scheduled for removal (see Roadmap)
+│   ├── SetupOverlay.tsx    # Mapbox geofence editor + demo-data controls
 │   └── ErrorBoundary.tsx
 ├── screens/
 │   ├── CaptureScreen.tsx
@@ -67,7 +72,7 @@ The old in-browser-Babel prototype (`app.jsx`, `capture.jsx`, `analysis.jsx`, `d
 
 ## Backend (Supabase)
 
-A single Postgres database holds all readings. Schema lives in `supabase/migrations/` (to be added).
+A single Postgres database holds all readings. Schema is applied to the Supabase project via migrations `0001_init` (tables) and `0002_rls_realtime` (open MVP RLS + realtime on `readings`).
 
 **Tables**
 
@@ -79,37 +84,31 @@ A single Postgres database holds all readings. Schema lives in `supabase/migrati
 
 **Edge Functions**
 
-- `analyze-tdr-photo` — accepts an image upload, calls OpenAI Vision, returns the parsed VWC number.
-- `pull-weather` — hourly cron, fetches NOAA conditions for the course's lat/lon, writes `weather_snapshots`.
-- `predict-vwc` — nightly job, fits a lightweight regression on recent readings + forecast weather, writes 7 days of predictions per hole.
+- `analyze-tdr-photo` — **shipped.** Accepts a base64 image, calls OpenAI Vision (`gpt-4o-mini`), returns the parsed VWC number. Analyze-only — the photo is not stored.
+- `pull-weather` — *planned (§4.5)*: hourly cron, fetches NOAA conditions for the course's lat/lon, writes `weather_snapshots`.
+- `predict-vwc` — *planned (§4.5)*: nightly job, fits a lightweight regression on recent readings + forecast weather, writes 7 days of predictions per hole.
 
 **Env vars**
 
 ```
 VITE_SUPABASE_URL=...
 VITE_SUPABASE_ANON_KEY=...
-OPENAI_API_KEY=...        # only read by the Edge Function, not the client
+VITE_MAPBOX_TOKEN=...      # Mapbox public token for the geofence map editor
+OPENAI_API_KEY=...         # client .env + set as a Supabase Edge Function secret; never exposed to the browser
 ```
 
 ## Roadmap
 
-### ✅ Shipped (prototype baseline)
-- Vite + React 18 + TypeScript scaffold.
-- Real GPS via `navigator.geolocation.watchPosition` with simulation fallback (`src/lib/gps.ts`).
-- IndexedDB persistence (`src/lib/db.ts`) — **will be removed when Supabase lands.**
-- Tech identity picker, persisted in localStorage (`src/components/TechPicker.tsx`, `src/lib/storage.ts`).
-- CSV export from Analysis and History screens (`src/lib/csv.ts`).
-- History tab — reverse-time, tech-filterable feed (`src/screens/HistoryScreen.tsx`).
-- Error boundary around the shell (`src/components/ErrorBoundary.tsx`).
-- Heatmap, Trends, Readings analysis modes (`src/screens/AnalysisScreen.tsx`).
+### ✅ Shipped
+- Vite + React 18 + TypeScript scaffold; real GPS via `watchPosition` with simulation fallback.
+- Tech identity picker, CSV export, History tab, error boundary, Heatmap/Trends/Readings analysis.
+- **Supabase as source of truth.** All readings in Postgres with a realtime subscription so a second tech's capture appears live (replaced IndexedDB).
+- **Photo-first capture.** Snap the TDR screen → `analyze-tdr-photo` Edge Function → OpenAI Vision parses the VWC → user confirms/edits. Manual number/slider stays as a fallback toggle.
+- **Geofencing.** GPS is point-in-polygon tested against the course's green polygons to auto-select the hole (suppressed when accuracy is worse than ~10 m); the manual hole strip stays as the override. Polygons are traced in the in-app Mapbox setup panel.
+- **Position pill removed.** The `front` / `middle` / `back` input and the `pos` field are gone from the UI, data model, and CSV.
 
-### 🎯 MVP — getting past the demo
-
-1. **Supabase as source of truth.** Drop IndexedDB, move all readings to Postgres. Realtime subscriptions so a second tech's capture appears live.
-2. **Geofencing.** Auto-resolve the current hole from GPS coordinates and the course's hole polygons. Manual hole picker stays as the fallback when GPS accuracy is poor (worse than ~10 m).
-3. **Photo-first capture.** Primary entry path: snap a photo of the TDR screen → OpenAI Vision parses the VWC number → user confirms or edits. Manual numeric entry stays as a fallback toggle.
-4. **Remove position pill.** The `front` / `middle` / `back` input is cut from the Capture screen and the `pos` field is dropped from the data model.
-5. **Weather + 7-day prediction.** Hourly NOAA pull. A lightweight regression model predicts VWC for the next 7 days per green; overlay on heatmap and trends.
+### 🎯 Next
+- **Weather + 7-day prediction (§4.5).** Hourly NOAA pull → `weather_snapshots`; a lightweight regression predicts VWC for the next 7 days per green, overlaid on the heatmap and trends.
 
 ### 🌱 Stretch
 - **Authentication** — Supabase magic-link, multi-user accounts, per-account readings.

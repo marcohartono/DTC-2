@@ -1,8 +1,8 @@
 # TurfIQ — Product Specification
 
-**Version:** 0.2 (post team-meeting re-scope)
-**Status:** Prototype shipped; MVP scope locked in (Supabase, photo capture, geofencing, weather predictions)
-**Last updated:** 2026-05-20
+**Version:** 0.3 (capture stack on Supabase shipped)
+**Status:** §4.1–§4.4 shipped — Supabase store + realtime, photo-first capture (OpenAI Vision), GPS geofencing, position pill removed. Weather + 7-day prediction (§4.5) remaining.
+**Last updated:** 2026-05-24
 **Source of truth:** `DTC-2` repo on `main`
 
 ---
@@ -11,7 +11,7 @@
 
 TurfIQ is a soil-moisture tracker built for golf-course greenkeepers — the field technicians and assistant superintendents who walk a course with a TDR (time-domain reflectometry) probe, push it into each green, and record the volumetric water content (VWC %). Today that data lives on clipboards, in spreadsheets, or in the probe's own offline log. TurfIQ replaces that with a phone-first capture flow plus an analysis view that shows the whole course as a heatmap and each green as a trend line.
 
-The current build is a **client-only Vite + React + TypeScript app** with readings persisted in IndexedDB. There is no server or auth yet. The layout is fluid (full viewport on phones, centred 440 px column on desktop). The MVP push — locked at the 2026-05-20 meeting — moves the data layer to Supabase, adds photo-first TDR capture via OpenAI Vision, geofences hole detection from GPS, and overlays a 7-day VWC forecast driven by NOAA weather (see §4).
+The current build is a **Vite + React + TypeScript app backed by Supabase** — readings, the course, and its geofence polygons live in Postgres, with a realtime subscription for live multi-device updates. There is no auth yet. The layout is fluid (full viewport on phones, centred 440 px column on desktop). The MVP push — locked at the 2026-05-20 meeting — has shipped Supabase as the primary store, photo-first TDR capture via OpenAI Vision, and GPS-geofenced hole detection; the remaining piece is a 7-day VWC forecast driven by NOAA weather (see §4).
 
 ### Primary jobs-to-be-done
 
@@ -49,7 +49,7 @@ This section catalogues what is shipped in the codebase today. Every behaviour l
 - Three-tab application: **Capture**, **Analysis**, **History** — all wired (History is no longer a stub).
 - Sticky top bar with the **TurfIQ** wordmark and contextual meta — a live GPS pill on Capture (real `accuracy` from `watchPosition`) and `{tech} · Winnetka Golf Course · [date] · N READINGS TODAY` on Analysis. The tech badge is tappable to re-open the tech picker.
 - A "Reading saved" toast (`✓` glyph, mossy pill, 1.8 s auto-dismiss) confirms each capture.
-- Reading state lives in `ReadingsContext` (`src/context/ReadingsContext.tsx`) and is hydrated from IndexedDB on mount.
+- Reading state lives in `ReadingsContext` (`src/context/ReadingsContext.tsx`), loaded from Supabase on mount with a realtime subscription so a second device's capture appears live. The course and its geofence polygons load via `CourseContext`.
 - Error boundary (`src/components/ErrorBoundary.tsx`) wraps `Shell` so a render error doesn't blank the frame.
 - Responsive layout: full viewport on phones; centred 440 px column on desktop. The fixed-390×844 iPhone bezel from the original prototype has been removed.
 
@@ -58,13 +58,12 @@ This section catalogues what is shipped in the codebase today. Every behaviour l
 The capture flow is built around the question "What's the moisture on hole N?" rendered as a serif headline.
 
 - **Reading-phase toggle**: a pair of icon buttons for **Before watering** (pre-irrigation) and **After watering** (post-irrigation). Selection is reflected in the meta label.
-- **Hole picker**: a horizontally-scrolling strip of 18 numbered buttons. The selected hole shows its par and yardage in the section meta (`Par 4 · 412y`).
-- **VWC readout**: a giant editable serif number with a `%` unit. Range `0–40` enforced on input. The current value snaps to a colour swatch and a moisture band label (Critical dry → Critical wet, see §6.1).
-- **Slider**: a 0–40 range slider with a gradient track matching the moisture scale. The thumb is a paper-coloured pill with a moss border; the slider and the typed number are bound to the same `value`.
+- **Photo-first VWC capture**: the primary action is a **📷 Photo of TDR** button. It opens the camera (`<input type="file" accept="image/*" capture="environment">`), sends the image to the `analyze-tdr-photo` Edge Function, and pre-fills the VWC field with the number OpenAI Vision reads off the meter. If the read fails, an inline error appears and the field falls back to manual entry.
+- **VWC readout**: a giant editable serif number with a `%` unit (range `0–40`), pre-filled by the photo read and editable to confirm/correct. The value snaps to a colour swatch and a moisture band label (Critical dry → Critical wet, see §6.1). An "Adjust manually instead" toggle reveals the 0–40 gradient **slider** for fine manual control.
+- **Geofenced hole picker**: a horizontally-scrolling strip of 18 numbered buttons (the selected hole shows its par/yardage, e.g. `Par 4 · 412y`). When the live GPS fix sits inside a green's polygon (and accuracy ≤ ~10 m), the hole auto-selects and a `Detected · hole N` pill appears; a manual tap always overrides. When no polygons are defined yet, a "set up hole map" link opens the setup panel (§3.7).
 - **Real GPS**: `useGps()` in `src/lib/gps.ts` calls `navigator.geolocation.watchPosition` with `enableHighAccuracy: true`; falls back to simulated jitter if permission is denied or the API is unavailable. The auto-stamp footer reads `{Live|Sim} · 42.1083°N 87.7305°W · ±{acc}m · HH:MM`.
-- **Submit button**: "Submit reading →" — disabled until value > 0 and a hole is selected. On submit it prepends a reading to context, writes through to IndexedDB, fires the toast, and resets the value to 18.0.
+- **Submit button**: "Submit reading →" — disabled until value > 0 and a hole is selected. On submit it inserts the reading into Supabase (prepending the returned row to state), fires the toast, and clears the value; a failed write raises a loud error toast.
 - **Last-reading caption**: under the CTA, "Last: hole N · X.X% · Y ago" using a relative-time formatter.
-- **Position pill** (`src/components/PositionPill.tsx`, mounted at `CaptureScreen.tsx:123`): three-way `front` / `middle` / `back` selector. **Scheduled for removal — see §4.4.**
 
 The tech identifier is sourced from the tech picker (`src/components/TechPicker.tsx`), persisted in localStorage via `src/lib/storage.ts`. First-run flow prompts the user for 2–4 letter initials.
 
@@ -95,15 +94,15 @@ A page header with `Winnetka Golf Course · Evanston, IL` and a serif "Field ana
 
 **Trends mode**: a vertical scroll of every hole as its own detail card with mini-trend chart. Critical holes are tagged `⚠ ATTN`. Tapping a card jumps back to Heatmap with that hole selected.
 
-**Readings mode**: a horizontal hole-strip selector at the top (each button gets a colour dot matching its average), then up to 8 rows showing timestamp + relative time, phase pill (`● before` / `◆ after`), lat/lon, position, tech initials, and the VWC value with a thin colour swatch.
+**Readings mode**: a horizontal hole-strip selector at the top (each button gets a colour dot matching its average), then up to 8 rows showing timestamp + relative time, phase pill (`● before` / `◆ after`), lat/lon, tech initials, and the VWC value with a thin colour swatch.
 
 ### 3.4 History screen (`src/screens/HistoryScreen.tsx`)
 
-A chronological reverse-time feed of every reading. Filterable by tech (All / Me / individual techs) and by range (24h / 7d / 30d). Each row shows `#{hole}`, timestamp + relative time, phase pill (`● before` / `◆ after`), position, tech, and VWC with a colour swatch. Tapping a row jumps to that hole in Analysis. Empty state ("No readings in range") when filters yield nothing. Same CSV export button as Analysis, with the active tech filter applied.
+A chronological reverse-time feed of every reading. Filterable by tech (All / Me / individual techs) and by range (24h / 7d / 30d). Each row shows `#{hole}`, timestamp + relative time, phase pill (`● before` / `◆ after`), tech, and VWC with a colour swatch. Tapping a row jumps to that hole in Analysis. Empty state ("No readings in range") when filters yield nothing. Same CSV export button as Analysis, with the active tech filter applied.
 
-### 3.5 Persistence (`src/lib/db.ts`, `src/context/ReadingsContext.tsx`)
+### 3.5 Persistence (`src/lib/supabase.ts`, `src/context/ReadingsContext.tsx`)
 
-Readings are stored in IndexedDB (database `turfiq`, object store `readings`, indexes on `t`, `hole`, `tech`). `ReadingsContext` calls `seedIfEmpty()` on first run with mock data, then `loadAllReadings()` on every mount, and write-throughs on `addReading`. The `Reading` type carries an optional `v: 1` field for future schema migrations. **This entire layer is slated for removal — see §4.1.**
+Readings live in Supabase Postgres (table `readings`, see §5). On mount `ReadingsContext` issues a `select` for the current course's readings and opens a realtime `INSERT` subscription (deduped by row `id`) so a second tech's capture appears live. `addReading` inserts a row and prepends the returned record; a failed write raises an error toast rather than failing silently. The legacy IndexedDB layer (`src/lib/db.ts`, `idb`) has been **removed**.
 
 ### 3.6 Mock data engine (`src/lib/mockData.ts`)
 
@@ -112,14 +111,23 @@ A deterministic-ish seed function generates `7 days × 18 holes × ~3 readings/d
 - Each hole gets a "personality" — baseline (14–22 %), per-day drift, and noise.
 - Three holes are overridden to surface interesting visualisation states: **hole 3** runs dry (baseline 9.5 %, falling), **hole 7** runs saturated (baseline 27 %, rising), **hole 14** is trending dry.
 - Each hole has a 65 % daily probability of being watered, which adds an `'after'` reading 30–60 minutes after the last `'before'` reading at a +5 to +9 point lift.
-- Readings carry: `hole`, `value`, `t` (ms), `phase` (`before|after`), `pos` (`front|middle|back`), `tech` (`JM|AR|CH`), `lat`, `lon`.
+- Readings carry: `hole`, `value`, `t` (ms), `phase` (`before|after`), `tech` (`JM|AR|CH`), `lat`, `lon`. They are inserted into Supabase on demand via the setup panel's "Load demo data" (§3.7), not auto-seeded.
 
 Three helpers are exposed on `window`:
 - `moistureColor(v)` — 7-stop colour scale from terracotta (dry) through olive/moss (optimal) to teal/navy (wet).
 - `moistureBand(v)` — named band + `dry|opt|wet` CSS class.
 - `fmtTime(ts)` and `fmtTimeShort(ts)` — relative ("3h ago") and short absolute ("May 14 · 7:42 AM") timestamps.
 
-### 3.7 Hosting & deploy
+### 3.7 Course setup & geofencing (`src/components/SetupOverlay.tsx`)
+
+A full-screen setup panel, opened from the ⚙ button in the top bar, holds two tools:
+
+- **Geofence editor** — a Mapbox satellite map (`mapbox-gl` + `mapbox-gl-draw`) that opens on the greenkeeper's live GPS position (Mapbox `GeolocateControl` plus a `useGps`-driven recenter; the Winnetka Golf Club centre is the pre-fix fallback). Pick a hole, trace its green as a polygon, and save — the polygons are written to `courses.geojson_holes` as a GeoJSON `FeatureCollection` (one Polygon per hole, tagged with its number) and drive the capture-screen auto-detect (§3.2). Holes with a saved polygon are marked on the strip.
+- **Demo data** — "Load demo data" bulk-inserts the generated mock dataset (§3.6) so Analysis/History are populated for a demo; "Clear all readings" empties the table. The database otherwise starts empty.
+
+The geofence editor is code-split (lazy-loaded), so Mapbox is fetched only when the panel opens. Note `navigator.geolocation` requires a secure context, so the dev server runs over HTTPS (see README).
+
+### 3.8 Hosting & deploy
 
 - Vite-built static site shipped to Vercel. Build command `npm run build`, output `dist/`.
 - `vercel.json` provides cache headers and clean URLs.
@@ -130,6 +138,8 @@ Three helpers are exposed on `window`:
 ## 4. Intended features (MVP scope)
 
 The team meeting on 2026-05-20 locked the following items as the MVP scope to get past the demo. Each ships incrementally; the order roughly mirrors dependency (Supabase first, since geofencing/photos/weather all write to it).
+
+**Status (2026-05-24):** §4.1–§4.4 are shipped (see §3). Notable as-built deviations: photo capture is **analyze-only** — the image is sent to the Edge Function as base64 and is *not* stored, so `photo_url` stays null and the `tdr-photos` Storage bucket below was dropped; geofence polygons are traced in-app via a Mapbox editor (§3.7); MVP RLS is intentionally open pending auth (§4.6); demo data loads on demand rather than auto-seeding. §4.5 (weather + prediction) is the remaining MVP item; §4.6 (auth) stays a stretch.
 
 ### 4.1 Supabase as primary store (replaces IndexedDB)
 
@@ -303,9 +313,12 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 | Path | Role |
 |---|---|
 | `src/main.tsx`, `src/App.tsx` | Entry + shell. Wires `ReadingsContext`, `ErrorBoundary`, top bar, tab bar, toast. |
-| `src/types.ts` | `Reading`, `Course`, `Hole`, `Tab`, `Phase`, `Position` (Position to be removed per §4.4). |
-| `src/context/ReadingsContext.tsx` | Readings state. Currently hydrates from IndexedDB; in MVP will switch to Supabase client + realtime subscription. |
-| `src/lib/db.ts` | IndexedDB wrapper (`idb`). Slated for removal. |
+| `src/types.ts` | `Reading`, `Course`, `Hole`, `Tab`, `Phase`. (`Position`/`pos` removed per §4.4.) |
+| `src/context/ReadingsContext.tsx` | Readings state via the Supabase client: initial `select` + realtime subscription + `addReading` insert + demo load/clear. |
+| `src/context/CourseContext.tsx` | Loads the course row + geofence polygons; `saveGeofences()`. |
+| `src/lib/supabase.ts` | Supabase client singleton (`VITE_SUPABASE_URL` / `_ANON_KEY`). |
+| `src/lib/geofence.ts` | GeoJSON types + point-in-polygon `detectHole()` for GPS hole detection. |
+| `src/components/SetupOverlay.tsx` | Mapbox geofence editor + demo-data load/clear controls. |
 | `src/lib/gps.ts` | `useGps()` — real `watchPosition` with simulation fallback. |
 | `src/lib/csv.ts` | `readingsToCsv`, `downloadCsv`, `csvFilename`. |
 | `src/lib/storage.ts` | localStorage helpers for tech id. |
@@ -314,26 +327,25 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 | `src/screens/CaptureScreen.tsx` | Capture flow. |
 | `src/screens/AnalysisScreen.tsx` | Heatmap / Trends / Readings. |
 | `src/screens/HistoryScreen.tsx` | Chronological feed. |
-| `src/components/*` | TopBar, TabBar, Toast, CourseHeatmap, TrendChart, TechPicker, PositionPill (to be removed), ErrorBoundary, icons. |
+| `src/components/*` | TopBar, TabBar, Toast, CourseHeatmap, TrendChart, TechPicker, SetupOverlay, ErrorBoundary, icons. |
 | `src/styles/styles.css` | All design tokens and component CSS. ~1225 lines. No CSS modules / Tailwind. |
 | `vite.config.ts`, `tsconfig*.json` | Build + strict TS. |
 | `vercel.json` | Cache headers + clean URLs for the static deploy. |
-| `supabase/migrations/` *(to be added)* | SQL migrations for the schema in §5. |
-| `supabase/functions/` *(to be added)* | Edge Functions: `analyze-tdr-photo`, `pull-weather`, `predict-vwc`. |
+| Supabase migrations | `0001_init` (tables) + `0002_rls_realtime` applied to the project (managed via MCP/dashboard; no local `supabase/` dir). |
+| Edge Functions | `analyze-tdr-photo` deployed (analyze-only); `pull-weather` / `predict-vwc` planned (§4.5). |
 
 **Runtime characteristics**
 
 - Vite + strict TypeScript. No Babel-in-browser. `npm run build` runs `tsc -b && vite build`.
-- React 18, `idb@8` for the (soon-to-go) IndexedDB layer. No state-management library; `ReadingsContext` is the single store.
+- React 18; `@supabase/supabase-js` for data + realtime, `mapbox-gl` + `@mapbox/mapbox-gl-draw` for the geofence editor (code-split). No state-management library; `ReadingsContext` + `CourseContext` are the stores.
 - Layout is fluid: full viewport on phones, centred 440 px column on desktop. No fixed iPhone frame.
 
 **Risks to address during the MVP push**
 
-1. **Network dependence** — once Supabase replaces IndexedDB, a green that's out of cell range has no fallback. An offline outbox is a stretch follow-up; in the meantime the UI must surface failed writes loudly.
-2. **OpenAI Vision cost ceiling** — the Edge Function should rate-limit per course/day so a stuck client can't burn a budget overnight.
-3. **Photo PII** — TDR photos may incidentally capture turf/shoes/people. Storage bucket is private; signed URLs only.
-4. **NOAA reliability** — outages or rate limits will leave forecasts stale. The `predict-vwc` job should degrade gracefully (skip prediction, not error).
-5. **Font CDN (Google Fonts)** is still a runtime dependency and a privacy footprint.
+1. **Network dependence** — with Supabase as the only store, a green that's out of cell range has no fallback. An offline outbox is a stretch follow-up; in the meantime the UI surfaces failed writes loudly (error toast on a failed insert).
+2. **Photo PII** — TDR photos may incidentally capture turf/shoes/people. Capture is analyze-only — the image is sent to the Edge Function and never stored — which keeps this footprint minimal.
+3. **NOAA reliability** — outages or rate limits will leave forecasts stale. The `predict-vwc` job should degrade gracefully (skip prediction, not error).
+4. **Font CDN (Google Fonts)** is still a runtime dependency and a privacy footprint.
 
 ---
 
@@ -341,8 +353,8 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 
 Canonical roadmap lives in [README.md → Roadmap](./README.md#roadmap). Summary:
 
-- **✅ Shipped** — Vite/React/TS scaffold, real GPS, IndexedDB (about to be removed), tech picker, CSV export, History tab, error boundary, Heatmap/Trends/Readings analysis.
-- **🎯 MVP** — Supabase as source of truth (§4.1), geofencing (§4.2), photo-first capture via OpenAI Vision (§4.3), remove the position pill (§4.4), weather + 7-day VWC prediction (§4.5).
+- **✅ Shipped** — Vite/React/TS scaffold, real GPS, tech picker, CSV export, History tab, error boundary, Heatmap/Trends/Readings analysis; **Supabase as source of truth (§4.1)**, **geofencing (§4.2)**, **photo-first capture via OpenAI Vision (§4.3)**, and **removal of the position pill (§4.4)**.
+- **🎯 MVP remaining** — weather + 7-day VWC prediction (§4.5).
 - **🌱 Stretch** — magic-link auth (§4.6), TDR Bluetooth pairing, multi-course view, irrigation-plan suggestions, offline outbox.
 
 ---
@@ -364,9 +376,8 @@ Canonical roadmap lives in [README.md → Roadmap](./README.md#roadmap). Summary
 
 - **Weather API tier.** Start with NOAA free, or stand up Open-Meteo as a backup? NOAA's rate limits may bite at hourly cadence across multiple courses.
 - **Prediction model class.** Start with linear regression — it's enough to ship and easy to explain. Move to gradient-boosted (xgboost) once we have >2 weeks of real reading data per course.
-- **OpenAI Vision budget.** Set a per-day per-course spend ceiling in the Edge Function. Default cap?
 - **Photo retention.** How long do TDR photos stick around in Storage — forever, 90 days, until the next reading on the same hole? Affects privacy disclosure copy.
 
 ---
 
-*Updated 2026-05-20 after the team scoping meeting. Sections 3, 4, 5, 7, 8, 9 reflect the new MVP plan: Supabase as primary store, photo-first capture via OpenAI Vision, geofenced hole detection, weather + 7-day VWC predictions, and the removal of the front/middle/back position pill.*
+*Updated 2026-05-24: §4.1–§4.4 shipped (Supabase primary store + realtime, photo-first capture via OpenAI Vision, GPS-geofenced hole detection, position pill removed); §3 and §7 describe the current build. Remaining MVP work: weather + 7-day VWC prediction (§4.5).*
