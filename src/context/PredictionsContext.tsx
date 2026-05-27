@@ -20,6 +20,7 @@ interface PredictionRow {
 interface PredictionsContextValue {
   predictions: VwcPrediction[];
   refresh: () => Promise<void>;
+  regenerate: (hole?: number) => Promise<void>;
   ready: boolean;
 }
 
@@ -62,9 +63,25 @@ export function PredictionsProvider({ children }: { children: ReactNode }) {
     };
   }, [courseId, courseReady, fetchPredictions]);
 
+  // Re-run the prediction model, then refetch. Pass a hole to recompute just
+  // that green (capture-triggered); omit it for a full-course refresh.
+  const regenerate = useCallback(
+    async (hole?: number) => {
+      const { error } = await supabase.functions.invoke('predict-vwc', {
+        body: hole ? { hole } : {},
+      });
+      if (error) {
+        console.error('predict-vwc invoke failed:', error.message);
+        return;
+      }
+      await fetchPredictions();
+    },
+    [fetchPredictions],
+  );
+
   const value = useMemo<PredictionsContextValue>(
-    () => ({ predictions, refresh: fetchPredictions, ready }),
-    [predictions, fetchPredictions, ready],
+    () => ({ predictions, refresh: fetchPredictions, regenerate, ready }),
+    [predictions, fetchPredictions, regenerate, ready],
   );
 
   return <PredictionsContext.Provider value={value}>{children}</PredictionsContext.Provider>;

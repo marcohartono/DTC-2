@@ -21,7 +21,7 @@ import { useGps } from './lib/gps';
 
 function Shell() {
   const { readings, addReading, ready, error, clearError } = useReadings();
-  const { predictions } = usePredictions();
+  const { predictions, regenerate } = usePredictions();
   const [tab, setTab] = useState<Tab>('capture');
   const [selectedHole, setSelectedHole] = useState(7);
   const [toast, setToast] = useState(false);
@@ -46,6 +46,9 @@ function Shell() {
       await addReading(r);
       setToast(true);
       setTimeout(() => setToast(false), 1800);
+      // Refresh the 7-day forecast for this hole in the background so the new
+      // reading (e.g. a watering bump) is reflected without waiting on cron.
+      void regenerate(r.hole);
     } catch {
       // Failure is surfaced through the error toast (context `error`).
     }

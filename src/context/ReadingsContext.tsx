@@ -84,7 +84,8 @@ export function ReadingsProvider({ children }: { children: ReactNode }) {
         .from('readings')
         .select('*')
         .eq('course_id', courseId)
-        .order('t', { ascending: false });
+        .order('t', { ascending: false })
+        .limit(50000); // override PostgREST's default 1000-row cap (demo holds ~1.5k)
       if (!alive) return;
       if (selErr) {
         setError('Could not load readings: ' + selErr.message);
@@ -209,7 +210,8 @@ export function ReadingsProvider({ children }: { children: ReactNode }) {
       .from('readings')
       .select('*')
       .eq('course_id', courseId)
-      .order('t', { ascending: false });
+      .order('t', { ascending: false })
+      .limit(50000);
     if (saved) {
       const mapped = (saved as ReadingRow[]).map(rowToReading);
       seenIds.current = new Set(mapped.map((r) => r.id).filter((id): id is string => !!id));
