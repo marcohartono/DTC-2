@@ -1,24 +1,60 @@
-import type { Reading } from '../types';
+import type { Reading, VwcPrediction } from '../types';
 import { COURSE } from '../lib/mockData';
 import { moistureColor } from '../lib/moisture';
 
 interface Props {
   readings: Reading[];
+  predictions: VwcPrediction[];
+  forecastDay: number;
   range: number;
   selectedHole: number;
   onSelectHole: (hole: number) => void;
 }
 
-export function CourseHeatmap({ readings, range, selectedHole, onSelectHole }: Props) {
+export function CourseHeatmap({
+  readings,
+  predictions,
+  forecastDay,
+  range,
+  selectedHole,
+  onSelectHole,
+}: Props) {
   const cutoff = Date.now() - range * 86_400_000;
   const recent = readings.filter((r) => r.t >= cutoff);
 
-  const avgByHole: Record<number, { sum: number; n: number }> = {};
+  // Measured average per hole over the selected range (forecastDay === 0).
+  const avgByHole: Record<number, number> = {};
+  const acc: Record<number, { sum: number; n: number }> = {};
   recent.forEach((r) => {
-    if (!avgByHole[r.hole]) avgByHole[r.hole] = { sum: 0, n: 0 };
-    avgByHole[r.hole]!.sum += r.value;
-    avgByHole[r.hole]!.n += 1;
+    if (!acc[r.hole]) acc[r.hole] = { sum: 0, n: 0 };
+    acc[r.hole]!.sum += r.value;
+    acc[r.hole]!.n += 1;
   });
+  Object.keys(acc).forEach((k) => {
+    const key = Number(k);
+    avgByHole[key] = acc[key]!.sum / acc[key]!.n;
+  });
+
+  // Predicted value per hole for the chosen forecast day: the prediction whose
+  // t_target is closest to now + forecastDay days.
+  const predByHole: Record<number, number> = {};
+  if (forecastDay > 0) {
+    const targetMs = Date.now() + forecastDay * 86_400_000;
+    const best: Record<number, { diff: number; value: number }> = {};
+    predictions.forEach((p) => {
+      const diff = Math.abs(p.tTarget - targetMs);
+      if (!best[p.hole] || diff < best[p.hole]!.diff) best[p.hole] = { diff, value: p.value };
+    });
+    Object.keys(best).forEach((k) => {
+      const key = Number(k);
+      predByHole[key] = best[key]!.value;
+    });
+  }
+
+  const valueForHole = (n: number): number | null => {
+    if (forecastDay > 0) return predByHole[n] ?? null;
+    return avgByHole[n] ?? null;
+  };
 
   const W = COURSE.w;
   const H = COURSE.h;
@@ -64,8 +100,7 @@ export function CourseHeatmap({ readings, range, selectedHole, onSelectHole }: P
       ))}
 
       {COURSE.holes.map((h) => {
-        const a = avgByHole[h.n];
-        const v = a ? a.sum / a.n : null;
+        const v = valueForHole(h.n);
         const c = v != null ? moistureColor(v) : 'rgba(243,237,224,0.18)';
         const isSel = h.n === selectedHole;
         const critical = v != null && (v < 12 || v > 26);

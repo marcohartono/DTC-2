@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { AnalysisRange, AnalysisView, Reading } from '../types';
+import type { AnalysisRange, AnalysisView, ForecastDay, Reading, VwcPrediction } from '../types';
 import { COURSE } from '../lib/mockData';
 import { moistureColor } from '../lib/moisture';
 import { fmtTime, fmtTimeShort } from '../lib/time';
@@ -9,13 +9,21 @@ import { csvFilename, downloadCsv, readingsToCsv } from '../lib/csv';
 
 interface Props {
   readings: Reading[];
+  predictions: VwcPrediction[];
   selectedHole: number;
   onSelectHole: (hole: number) => void;
 }
 
-export function AnalysisScreen({ readings, selectedHole, onSelectHole }: Props) {
+export function AnalysisScreen({ readings, predictions, selectedHole, onSelectHole }: Props) {
   const [range, setRange] = useState<AnalysisRange>(7);
   const [view, setView] = useState<AnalysisView>('heatmap');
+  const [forecastDay, setForecastDay] = useState<ForecastDay>(0);
+
+  const holePredictions = useMemo(
+    () => predictions.filter((p) => p.hole === selectedHole).sort((a, b) => a.tTarget - b.tTarget),
+    [predictions, selectedHole],
+  );
+  const hasForecast = predictions.length > 0;
 
   const cutoff = Date.now() - range * 86_400_000;
 
@@ -112,11 +120,30 @@ export function AnalysisScreen({ readings, selectedHole, onSelectHole }: Props) 
         <div className="analysis-grid">
           <div className="heatmap-wrap">
             <div className="hm-head">
-              <span className="t">Course moisture · last {range === 1 ? '24h' : range + ' days'}</span>
+              <span className="t">
+                {forecastDay === 0
+                  ? `Course moisture · last ${range === 1 ? '24h' : range + ' days'}`
+                  : `Forecast · +${forecastDay}d out`}
+              </span>
               <span className="s">Tap a green</span>
             </div>
+            {hasForecast && (
+              <div className="forecast-toggle">
+                {([0, 1, 3, 7] as ForecastDay[]).map((d) => (
+                  <button
+                    key={d}
+                    className={forecastDay === d ? 'sel' : ''}
+                    onClick={() => setForecastDay(d)}
+                  >
+                    {d === 0 ? 'Today' : '+' + d + 'd'}
+                  </button>
+                ))}
+              </div>
+            )}
             <CourseHeatmap
               readings={readings}
+              predictions={predictions}
+              forecastDay={forecastDay}
               range={range}
               selectedHole={selectedHole}
               onSelectHole={onSelectHole}
@@ -152,8 +179,14 @@ export function AnalysisScreen({ readings, selectedHole, onSelectHole }: Props) 
             <div className="legend-chips">
               <span><span className="dot-moss" />Before water</span>
               <span><span className="dot-info" />After water</span>
+              {holePredictions.length > 0 && <span><span className="dash-forecast" />Forecast</span>}
             </div>
-            <TrendChart readings={readings} hole={selectedHole} range={range} />
+            <TrendChart
+              readings={readings}
+              hole={selectedHole}
+              range={range}
+              predictions={holePredictions}
+            />
             {stats && (
               <div className="stat-row">
                 <div className="s">

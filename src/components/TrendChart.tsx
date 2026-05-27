@@ -5,9 +5,10 @@ interface Props {
   readings: Reading[];
   hole: number;
   range: number;
+  predictions?: { tTarget: number; value: number }[];
 }
 
-export function TrendChart({ readings, hole, range }: Props) {
+export function TrendChart({ readings, hole, range, predictions = [] }: Props) {
   const cutoff = Date.now() - range * 86_400_000;
   const data = readings
     .filter((r) => r.hole === hole && r.t >= cutoff)
@@ -40,8 +41,14 @@ export function TrendChart({ readings, hole, range }: Props) {
     );
   }
 
+  const now = Date.now();
+  const fc = predictions
+    .filter((p) => p.tTarget > now)
+    .sort((a, b) => a.tTarget - b.tTarget);
+  const hasForecast = data.length >= 2 && fc.length > 0;
+
   const tMin = cutoff;
-  const tMax = Date.now();
+  const tMax = hasForecast ? Math.max(now, fc[fc.length - 1]!.tTarget) : now;
   const yMin = 6;
   const yMax = 32;
 
@@ -61,6 +68,16 @@ export function TrendChart({ readings, hole, range }: Props) {
   for (let i = 0; i <= range; i++) xTicks.push(tMin + i * 86_400_000);
 
   const last = data[data.length - 1]!;
+
+  // Dashed forecast: continue from the last measured point through the
+  // predicted values (§4.5). Built only when there's a forecast to show.
+  let fd = '';
+  if (hasForecast) {
+    fd = 'M' + x(last.t).toFixed(1) + ',' + y(last.value).toFixed(1) + ' ';
+    fc.forEach((p) => {
+      fd += 'L' + x(p.tTarget).toFixed(1) + ',' + y(p.value).toFixed(1) + ' ';
+    });
+  }
 
   return (
     <svg className="trend-chart" viewBox={`0 0 ${W} ${H}`}>
@@ -130,6 +147,42 @@ export function TrendChart({ readings, hole, range }: Props) {
       })}
 
       <circle cx={x(last.t)} cy={y(last.value)} r="3.5" fill="none" stroke="var(--moss)" strokeWidth="1" />
+
+      {hasForecast && (
+        <>
+          <line
+            x1={x(now)}
+            y1={padT}
+            x2={x(now)}
+            y2={H - padB}
+            stroke="var(--bone-3)"
+            strokeWidth="0.75"
+            strokeDasharray="2 3"
+          />
+          <path
+            d={fd}
+            fill="none"
+            stroke="var(--ink-2)"
+            strokeWidth="1.25"
+            strokeDasharray="3 3"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            opacity="0.7"
+          />
+          {fc.map((p, i) => (
+            <circle
+              key={`fc-${i}`}
+              cx={x(p.tTarget)}
+              cy={y(p.value)}
+              r="2.4"
+              fill="var(--paper)"
+              stroke="var(--ink-2)"
+              strokeWidth="1"
+              opacity="0.85"
+            />
+          ))}
+        </>
+      )}
     </svg>
   );
 }

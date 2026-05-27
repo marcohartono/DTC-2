@@ -14,7 +14,7 @@ Soil-moisture tracker for golf-course greenkeepers. Vite + React + TypeScript, m
 | Backend | **Supabase**: Postgres + Row Level Security + realtime; an Edge Function (`analyze-tdr-photo`) calls OpenAI Vision. |
 | Maps | **Mapbox GL** + `mapbox-gl-draw` — satellite geofence editor for tracing the green polygons. |
 | AI | **OpenAI Vision** (`gpt-4o-mini`) reads TDR screen photos into VWC values. |
-| Weather | **NOAA API** + a lightweight regression for 7-day VWC forecasts *(planned — §4.5)*. |
+| Weather | **Open-Meteo** (hourly pull) + a per-hole linear regression for 7-day VWC forecasts. |
 
 ## Develop
 
@@ -77,16 +77,16 @@ A single Postgres database holds all readings. Schema is applied to the Supabase
 **Tables**
 
 - `readings` — `id, course_id, hole, vwc_value, phase, t, lat, lon, tech, photo_url, created_at`
-- `courses` — `id, name, city, geojson_holes` (green polygons used for geofencing)
-- `weather_snapshots` — `course_id, t, temp_f, humidity_pct, precip_mm, wind_mph` (hourly NOAA pulls)
+- `courses` — `id, name, city, lat, lon, geojson_holes` (green polygons used for geofencing; `lat`/`lon` drive the weather pull)
+- `weather_snapshots` — `course_id, t, is_forecast, temp_f, humidity_pct, precip_mm, wind_mph` (hourly Open-Meteo pulls)
 - `vwc_predictions` — `course_id, hole, t_target, predicted_vwc, model_version`
 - `users` — Supabase auth users (stretch goal)
 
 **Edge Functions**
 
 - `analyze-tdr-photo` — **shipped.** Accepts a base64 image, calls OpenAI Vision (`gpt-4o-mini`), returns the parsed VWC number. Analyze-only — the photo is not stored.
-- `pull-weather` — *planned (§4.5)*: hourly cron, fetches NOAA conditions for the course's lat/lon, writes `weather_snapshots`.
-- `predict-vwc` — *planned (§4.5)*: nightly job, fits a lightweight regression on recent readings + forecast weather, writes 7 days of predictions per hole.
+- `pull-weather` — **shipped.** Hourly cron (`pg_cron` + `pg_net`): fetches Open-Meteo observations + 7-day forecast for the course's lat/lon, upserts `weather_snapshots`.
+- `predict-vwc` — **shipped.** Nightly cron: per hole, fits a small linear regression of daily VWC change against weather (temp, precip) and rolls it forward over the 7-day forecast, upserting `vwc_predictions`. Falls back to physical defaults when a hole has too little history. Writes via the service-role key (no extra secret).
 
 **Env vars**
 
@@ -106,9 +106,7 @@ OPENAI_API_KEY=...         # client .env + set as a Supabase Edge Function secre
 - **Photo-first capture.** Snap the TDR screen → `analyze-tdr-photo` Edge Function → OpenAI Vision parses the VWC → user confirms/edits. Manual number/slider stays as a fallback toggle.
 - **Geofencing.** GPS is point-in-polygon tested against the course's green polygons to auto-select the hole (suppressed when accuracy is worse than ~10 m); the manual hole strip stays as the override. Polygons are traced in the in-app Mapbox setup panel.
 - **Position pill removed.** The `front` / `middle` / `back` input and the `pos` field are gone from the UI, data model, and CSV.
-
-### 🎯 Next
-- **Weather + 7-day prediction (§4.5).** Hourly NOAA pull → `weather_snapshots`; a lightweight regression predicts VWC for the next 7 days per green, overlaid on the heatmap and trends.
+- **Weather + 7-day prediction (§4.5).** Hourly Open-Meteo pull → `weather_snapshots`; a per-hole linear regression predicts VWC for the next 7 days per green, overlaid on the heatmap (Today / +1d / +3d / +7d toggle) and as a dashed extension on the trend chart. "Load demo data" pulls **live** weather and generates readings coherent with that real history, then runs the model against the **live forecast** — only the past readings are synthetic, the prediction is real.
 
 ### 🌱 Stretch
 - **Authentication** — Supabase magic-link, multi-user accounts, per-account readings.

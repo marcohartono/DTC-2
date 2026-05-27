@@ -27,82 +27,112 @@ export const COURSE: Course = {
   ],
 };
 
+const DAY = 86_400_000;
+const TECHS: Tech[] = ['JM', 'AR', 'CH'];
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+
 function seededRand(seed: number): () => number {
-  let s = seed;
+  let s = ((seed % 233280) + 233280) % 233280;
   return () => {
     s = (s * 9301 + 49297) % 233280;
     return s / 233280;
   };
 }
 
-const TECHS: Tech[] = ['JM', 'AR', 'CH'];
+// Normalised weather features — identical to the ones predict-vwc fits on, so
+// the per-hole regression recovers the coefficients these demo readings were
+// generated from. f_temp ≈ 0 at a mild 60°F, f_precip ≈ 1 per 5 mm of rain.
+const fTemp = (tempF: number) => (tempF - 60) / 10;
+const fPrecip = (mm: number) => mm / 5;
 
-export function makeReadings(): Reading[] {
-  const now = Date.now();
+// One day of real observed weather (aggregated from live Open-Meteo rows), used
+// only to drive the demo readings — there is no synthetic/scripted weather.
+export interface ObservedDay {
+  dayIdx: number; // UTC day index (floor(ms / 86_400_000))
+  tempF: number; // daily mean
+  precipMm: number; // daily sum
+}
+
+interface Personality {
+  target: number; // managed optimal VWC the greenkeeper irrigates toward
+  kT: number; // drying response to heat (negative, applied to f_temp)
+  kP: number; // gain response to precip (positive, applied to f_precip)
+  mr: number; // mean-reversion strength toward target (the irrigation proxy)
+  noise: number;
+  waterProb: number;
+}
+
+function personalityFor(hole: number): Personality {
+  const r = seededRand(hole * 137 + 7);
+  const p: Personality = {
+    target: 17 + r() * 4, // 17–21: sits inside the 14–22 optimal band
+    kT: -(0.7 + r() * 0.7), // -0.7 .. -1.4 (heat-driven drying)
+    kP: 1.8 + r() * 0.9, //  1.8 .. 2.7 (precip gain)
+    mr: 0.35 + r() * 0.15, // daily pull back toward target
+    noise: 0.8 + r() * 0.7,
+    waterProb: 0.25 + r() * 0.15,
+  };
+  // Personality overrides that surface interesting states on the heatmap.
+  if (hole === 3) { p.target = 12; p.kT = -1.3; p.mr = 0.28; } // runs dry, fast drier, watered less
+  if (hole === 7) { p.target = 24; p.kP = 2.8; p.mr = 0.45; } // kept on the wet side
+  if (hole === 14) { p.target = 14; p.kT = -1.2; p.mr = 0.3; } // trending dry
+  return p;
+}
+
+// Weather-coherent demo readings, driven by the REAL observed-weather series
+// (passed in from live Open-Meteo). Each hole's daily VWC is a weather response
+// (kT·heat + kP·precip — the form predict-vwc fits) plus a mean-reversion toward
+// the hole's managed target, which stands in for routine irrigation and keeps
+// measured values realistic (~14–22%). Because the weather signal still drives
+// the day-to-day deltas, predict-vwc recovers per-hole coefficients from these
+// readings and then forecasts off the LIVE 7-day forecast — no scripted weather.
+export function makeReadings(observed: ObservedDay[], now = Date.now()): Reading[] {
+  const days = [...observed].sort((a, b) => a.dayIdx - b.dayIdx);
   const readings: Reading[] = [];
 
-  const personalities = COURSE.holes.map((h) => {
-    const r = seededRand(h.n * 137 + 7);
-    return {
-      hole: h.n,
-      base: 14 + r() * 8,
-      drift: (r() - 0.5) * 0.5,
-      noise: 1.2 + r() * 1.4,
-      flag: r(),
-    };
-  });
+  for (const hole of COURSE.holes.map((h) => h.n)) {
+    const p = personalityFor(hole);
+    const r = seededRand(hole * 911 + 41);
+    let vwc = p.target;
 
-  personalities[2].base = 9.5;
-  personalities[2].drift = -0.4;
-  personalities[6].base = 27.0;
-  personalities[6].drift = 0.3;
-  personalities[13].base = 11.5;
-  personalities[13].drift = -0.5;
+    for (const day of days) {
+      const weather = p.kT * fTemp(day.tempF) + p.kP * fPrecip(day.precipMm);
+      const reversion = p.mr * (p.target - vwc);
+      vwc = clamp(vwc + weather + reversion, 4, 34);
 
-  for (let day = 6; day >= 0; day--) {
-    personalities.forEach((p) => {
-      const hole = p.hole;
-      const r = seededRand(hole * 999 + day * 31);
+      const dayStart = day.dayIdx * DAY;
       const count = 2 + Math.floor(r() * 2);
-      const watered = r() > 0.35;
-      let waterT: number | null = null;
-
       for (let k = 0; k < count; k++) {
-        const hour = 6 + k * 4 + r() * 1.5;
-        const t = now - day * 86_400_000 - (24 - hour) * 3_600_000;
-        const value = Math.max(
-          4,
-          Math.min(34, p.base + p.drift * (6 - day) + (r() - 0.5) * p.noise * 2),
-        );
+        const hour = 6 + k * 3 + r() * 1.5;
         readings.push({
           hole,
-          value: Math.round(value * 10) / 10,
-          t,
+          value: Math.round(clamp(vwc + (r() - 0.5) * p.noise * 2, 4, 34) * 10) / 10,
+          t: dayStart + hour * 3_600_000,
           phase: 'before',
           tech: TECHS[Math.floor(r() * 3)]!,
           lat: 42.1091 + (r() - 0.5) * 0.001,
           lon: -87.7591 + (r() - 0.5) * 0.001,
-          v: 1,
         });
-        if (k === count - 1) waterT = t + 30 * 60_000 + r() * 30 * 60_000;
       }
 
-      if (watered && waterT && waterT < now) {
-        const beforeLast = p.base + p.drift * (6 - day);
-        const afterValue = Math.max(8, Math.min(34, beforeLast + 5 + r() * 4));
+      // Occasional watering on a dry day → a small 'after' lift (for the
+      // before/after UI). Not carried forward; reversion already models upkeep.
+      if (r() < p.waterProb && day.precipMm < 2 && vwc < p.target) {
+        const after = clamp(vwc + 2.5 + r() * 2, 4, 34);
         readings.push({
           hole,
-          value: Math.round(afterValue * 10) / 10,
-          t: waterT,
+          value: Math.round(after * 10) / 10,
+          t: dayStart + (14 + r() * 2) * 3_600_000,
           phase: 'after',
           tech: TECHS[Math.floor(r() * 3)]!,
           lat: 42.1091 + (r() - 0.5) * 0.001,
           lon: -87.7591 + (r() - 0.5) * 0.001,
-          v: 1,
         });
       }
-    });
+    }
   }
 
-  return readings.sort((a, b) => b.t - a.t);
+  // Drop any readings that land in the future (boundary of the current day).
+  return readings.filter((x) => x.t <= now).sort((a, b) => b.t - a.t);
 }

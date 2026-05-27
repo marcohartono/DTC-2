@@ -1,8 +1,8 @@
 # TurfIQ — Product Specification
 
-**Version:** 0.3 (capture stack on Supabase shipped)
-**Status:** §4.1–§4.4 shipped — Supabase store + realtime, photo-first capture (OpenAI Vision), GPS geofencing, position pill removed. Weather + 7-day prediction (§4.5) remaining.
-**Last updated:** 2026-05-24
+**Version:** 0.4 (weather + 7-day prediction shipped)
+**Status:** §4.1–§4.5 shipped — Supabase store + realtime, photo-first capture (OpenAI Vision), GPS geofencing, position pill removed, and weather-driven 7-day VWC prediction. Authentication (§4.6) stays the remaining stretch.
+**Last updated:** 2026-05-27
 **Source of truth:** `DTC-2` repo on `main`
 
 ---
@@ -139,7 +139,7 @@ The geofence editor is code-split (lazy-loaded), so Mapbox is fetched only when 
 
 The team meeting on 2026-05-20 locked the following items as the MVP scope to get past the demo. Each ships incrementally; the order roughly mirrors dependency (Supabase first, since geofencing/photos/weather all write to it).
 
-**Status (2026-05-24):** §4.1–§4.4 are shipped (see §3). Notable as-built deviations: photo capture is **analyze-only** — the image is sent to the Edge Function as base64 and is *not* stored, so `photo_url` stays null and the `tdr-photos` Storage bucket below was dropped; geofence polygons are traced in-app via a Mapbox editor (§3.7); MVP RLS is intentionally open pending auth (§4.6); demo data loads on demand rather than auto-seeding. §4.5 (weather + prediction) is the remaining MVP item; §4.6 (auth) stays a stretch.
+**Status (2026-05-27):** §4.1–§4.5 are shipped (see §3). Notable as-built deviations: photo capture is **analyze-only** — the image is sent to the Edge Function as base64 and is *not* stored, so `photo_url` stays null and the `tdr-photos` Storage bucket below was dropped; geofence polygons are traced in-app via a Mapbox editor (§3.7); MVP RLS is intentionally open pending auth (§4.6); demo data loads on demand rather than auto-seeding. Weather (§4.5) uses **Open-Meteo** rather than NOAA (resolves the §9 question) — no API key, and it returns quantitative precip in mm. §4.6 (auth) stays a stretch.
 
 ### 4.1 Supabase as primary store (replaces IndexedDB)
 
@@ -181,17 +181,17 @@ The `front` / `middle` / `back` selector adds no decision value in the field. Cu
 - Drop `position` from the CSV header in `src/lib/csv.ts`.
 - Do **not** include a `pos` column in the Supabase `readings` migration.
 
-### 4.5 Weather + 7-day VWC prediction
+### 4.5 Weather + 7-day VWC prediction *(shipped)*
 
-- **Edge Function `pull-weather`** — runs hourly via Supabase cron. For each course, fetches NOAA's hourly observation + 7-day forecast for the course's lat/lon. Writes one row to `weather_snapshots` per pull.
-- **Edge Function `predict-vwc`** — runs nightly. Per hole:
-  - Pulls the last 30 days of `readings`.
-  - Pulls the next 7 days of NOAA forecast (`weather_snapshots` rows with `t > now()`).
-  - Fits a small regression (start with linear; features: recent avg VWC, days since last `after` reading, forecast precip, forecast temp).
-  - Writes 7 rows into `vwc_predictions` (`t_target` = now + 1d, +2d, …, +7d).
+- **Edge Function `pull-weather`** — runs hourly via `pg_cron` + `pg_net`. For each course with a lat/lon it fetches **Open-Meteo** (`past_days=7`, `forecast_days=7`, fahrenheit / mph / mm) and upserts one `weather_snapshots` row per hour (`is_forecast=false` for the observed past, `true` for the forecast). Degrades per-course — one bad fetch never fails the run.
+- **Edge Function `predict-vwc`** — runs nightly (and is invoked by the demo seeder). Per hole:
+  - Pulls the last 30 days of `readings` (daily-meaned) and the observed/forecast `weather_snapshots` (daily-aggregated: mean temp, summed precip).
+  - Fits a small **per-hole** linear regression of daily ΔVWC on `[1, temp, precip]` (ridge-regularised 3×3 solve). Topology / shade / drainage are captured implicitly as each hole's own response. Falls back to physical defaults (heat → drying, rain → gain) when a hole has < ~5 aligned day-deltas.
+  - Rolls the model forward over the 7-day forecast and upserts 7 rows into `vwc_predictions` (`t_target` = now + 1d … +7d, `model_version = 'linreg-v1'`). Writes via the service-role key; no extra secret needed.
 - **Frontend overlay:**
-  - Heatmap gains a `Forecast` toggle: `Today` (current data), `+1d`, `+3d`, `+7d`. Switching the toggle re-colours each green from the matching `vwc_predictions` row instead of measured averages.
-  - Trend chart adds a dashed extension after the latest measured point, plotting the 7 predicted values for that hole.
+  - Heatmap gains a forecast toggle: `Today` (measured), `+1d`, `+3d`, `+7d`. A non-`Today` selection re-colours each green from the `vwc_predictions` row nearest that day.
+  - The hole-detail trend chart adds a dashed extension (with a "now" divider) after the latest measured point, plotting the 7 predicted values for that hole.
+- **Demo:** only the past readings are synthetic — the weather and the prediction are **live**. "Load demo data" pulls real Open-Meteo weather (30 days observed + the live 7-day forecast via `pull-weather`), generates four weeks of readings *coherent with that real observed history*, then runs `predict-vwc` against the live forecast. So the forecast reflects the actual upcoming weather (e.g. a mild, dry week shows a gentle per-hole dry-down), never a hard-coded scenario.
 
 ### 4.6 Authentication (stretch)
 
@@ -233,6 +233,8 @@ The MVP backend is a single Postgres database. Schema migrations live in `supaba
 | `id`            | `uuid`  | pk                                                             |
 | `name`          | `text`  | "Winnetka Golf Course"                                                 |
 | `city`          | `text`  | "Evanston, IL"                                        |
+| `lat`           | `numeric` | course centre latitude; drives the Open-Meteo pull (§4.5)    |
+| `lon`           | `numeric` | course centre longitude                                      |
 | `geojson_holes` | `jsonb` | `FeatureCollection` of 18 green polygons; used for geofencing  |
 
 ### `weather_snapshots`
@@ -315,7 +317,8 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 | `src/main.tsx`, `src/App.tsx` | Entry + shell. Wires `ReadingsContext`, `ErrorBoundary`, top bar, tab bar, toast. |
 | `src/types.ts` | `Reading`, `Course`, `Hole`, `Tab`, `Phase`. (`Position`/`pos` removed per §4.4.) |
 | `src/context/ReadingsContext.tsx` | Readings state via the Supabase client: initial `select` + realtime subscription + `addReading` insert + demo load/clear. |
-| `src/context/CourseContext.tsx` | Loads the course row + geofence polygons; `saveGeofences()`. |
+| `src/context/CourseContext.tsx` | Loads the course row (incl. lat/lon) + geofence polygons; `saveGeofences()`. |
+| `src/context/PredictionsContext.tsx` | Loads `vwc_predictions` for the course; `usePredictions()` + `refresh()` (re-fetched after a demo load). |
 | `src/lib/supabase.ts` | Supabase client singleton (`VITE_SUPABASE_URL` / `_ANON_KEY`). |
 | `src/lib/geofence.ts` | GeoJSON types + point-in-polygon `detectHole()` for GPS hole detection. |
 | `src/components/SetupOverlay.tsx` | Mapbox geofence editor + demo-data load/clear controls. |
@@ -331,8 +334,8 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 | `src/styles/styles.css` | All design tokens and component CSS. ~1225 lines. No CSS modules / Tailwind. |
 | `vite.config.ts`, `tsconfig*.json` | Build + strict TS. |
 | `vercel.json` | Cache headers + clean URLs for the static deploy. |
-| Supabase migrations | `0001_init` (tables) + `0002_rls_realtime` applied to the project (managed via MCP/dashboard; no local `supabase/` dir). |
-| Edge Functions | `analyze-tdr-photo` deployed (analyze-only); `pull-weather` / `predict-vwc` planned (§4.5). |
+| Supabase migrations | `0001_init`, `0002_rls_realtime`, `0003_weather_prediction` (course lat/lon + `weather_snapshots`/`vwc_predictions` + `pg_cron`/`pg_net`), `0004_open_rls_weather_prediction`. Managed via MCP/dashboard; no local `supabase/` dir. |
+| Edge Functions | `analyze-tdr-photo` (analyze-only), `pull-weather` (hourly Open-Meteo → `weather_snapshots`), `predict-vwc` (nightly per-hole regression → `vwc_predictions`). All deployed; the weather jobs run on `pg_cron`. |
 
 **Runtime characteristics**
 
@@ -344,7 +347,7 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 
 1. **Network dependence** — with Supabase as the only store, a green that's out of cell range has no fallback. An offline outbox is a stretch follow-up; in the meantime the UI surfaces failed writes loudly (error toast on a failed insert).
 2. **Photo PII** — TDR photos may incidentally capture turf/shoes/people. Capture is analyze-only — the image is sent to the Edge Function and never stored — which keeps this footprint minimal.
-3. **NOAA reliability** — outages or rate limits will leave forecasts stale. The `predict-vwc` job should degrade gracefully (skip prediction, not error).
+3. **Weather-feed reliability** — Open-Meteo outages will leave forecasts stale. Both jobs degrade gracefully: `pull-weather` skips a failing course without failing the run, and `predict-vwc` skips a course with no forecast rather than erroring.
 4. **Font CDN (Google Fonts)** is still a runtime dependency and a privacy footprint.
 
 ---
@@ -353,9 +356,8 @@ The combination — editorial serif headlines, mono operational metadata, soft p
 
 Canonical roadmap lives in [README.md → Roadmap](./README.md#roadmap). Summary:
 
-- **✅ Shipped** — Vite/React/TS scaffold, real GPS, tech picker, CSV export, History tab, error boundary, Heatmap/Trends/Readings analysis; **Supabase as source of truth (§4.1)**, **geofencing (§4.2)**, **photo-first capture via OpenAI Vision (§4.3)**, and **removal of the position pill (§4.4)**.
-- **🎯 MVP remaining** — weather + 7-day VWC prediction (§4.5).
-- **🌱 Stretch** — magic-link auth (§4.6), TDR Bluetooth pairing, multi-course view, irrigation-plan suggestions, offline outbox.
+- **✅ Shipped** — Vite/React/TS scaffold, real GPS, tech picker, CSV export, History tab, error boundary, Heatmap/Trends/Readings analysis; **Supabase as source of truth (§4.1)**, **geofencing (§4.2)**, **photo-first capture via OpenAI Vision (§4.3)**, **removal of the position pill (§4.4)**, and **weather + 7-day VWC prediction (§4.5)**.
+- **🌱 Stretch** — magic-link auth (§4.6), TDR Bluetooth pairing, multi-course view, irrigation-plan suggestions, offline outbox; upgrade the prediction model from linear to gradient-boosted once there's >2 weeks of real reading data.
 
 ---
 
@@ -374,10 +376,10 @@ Canonical roadmap lives in [README.md → Roadmap](./README.md#roadmap). Summary
 
 ### New from the meeting
 
-- **Weather API tier.** Start with NOAA free, or stand up Open-Meteo as a backup? NOAA's rate limits may bite at hourly cadence across multiple courses.
-- **Prediction model class.** Start with linear regression — it's enough to ship and easy to explain. Move to gradient-boosted (xgboost) once we have >2 weeks of real reading data per course.
+- ~~**Weather API tier.**~~ Resolved: shipped on **Open-Meteo** — no API key, no rate-limit friction at hourly cadence, and it returns quantitative precip in mm (maps straight to `precip_mm`). NOAA can be a future backup if needed.
+- **Prediction model class.** Shipped with per-hole linear regression — enough to ship and easy to explain. Move to gradient-boosted (xgboost) once we have >2 weeks of real reading data per course.
 - **Photo retention.** How long do TDR photos stick around in Storage — forever, 90 days, until the next reading on the same hole? Affects privacy disclosure copy.
 
 ---
 
-*Updated 2026-05-24: §4.1–§4.4 shipped (Supabase primary store + realtime, photo-first capture via OpenAI Vision, GPS-geofenced hole detection, position pill removed); §3 and §7 describe the current build. Remaining MVP work: weather + 7-day VWC prediction (§4.5).*
+*Updated 2026-05-27: §4.5 shipped — weather + 7-day VWC prediction on Open-Meteo (hourly `pull-weather`) with a per-hole linear model (nightly `predict-vwc`), surfaced as a heatmap forecast toggle and a dashed trend extension; the demo loader pulls live weather + generates coherent readings + runs the model on the live forecast (only past readings are synthetic). §4.1–§4.4 remain as previously shipped. Only stretch work (auth §4.6 et al.) remains.*
