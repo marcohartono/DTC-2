@@ -6,6 +6,7 @@ import '@mapbox/mapbox-gl-draw/dist/mapbox-gl-draw.css';
 import { COURSE } from '../lib/mockData';
 import { useCourse } from '../context/CourseContext';
 import { useReadings } from '../context/ReadingsContext';
+import { usePredictions } from '../context/PredictionsContext';
 import { useGps } from '../lib/gps';
 import type { HoleFeatureCollection } from '../lib/geofence';
 
@@ -18,6 +19,7 @@ interface Props {
 export function SetupOverlay({ onClose }: Props) {
   const { geofences, saveGeofences } = useCourse();
   const { readings, loadDemoData, clearAllReadings } = useReadings();
+  const { refresh: refreshPredictions } = usePredictions();
   const gps = useGps();
 
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -176,7 +178,8 @@ export function SetupOverlay({ onClose }: Props) {
     setMsg(null);
     try {
       const n = await loadDemoData();
-      setMsg(`Loaded ${n} demo readings.`);
+      await refreshPredictions();
+      setMsg(`Loaded ${n} readings + weather, generated 7-day forecast.`);
     } catch {
       setMsg('Failed to load demo data.');
     } finally {
@@ -185,12 +188,13 @@ export function SetupOverlay({ onClose }: Props) {
   };
 
   const onClear = async () => {
-    if (!window.confirm('Delete ALL readings for this course? This cannot be undone.')) return;
+    if (!window.confirm('Delete ALL readings, weather, and forecasts for this course? This cannot be undone.')) return;
     setBusy('clear');
     setMsg(null);
     try {
       await clearAllReadings();
-      setMsg('All readings cleared.');
+      await refreshPredictions();
+      setMsg('All readings, weather, and forecasts cleared.');
     } catch {
       setMsg('Failed to clear readings.');
     } finally {
@@ -255,15 +259,17 @@ export function SetupOverlay({ onClose }: Props) {
               <span className="cs-meta">{readings.length} readings</span>
             </div>
             <p className="setup-p">
-              The database starts empty. Load a week of generated readings to populate the
-              Analysis heatmap and History for a demo, or clear everything to start fresh.
+              The database starts empty. "Load demo data" pulls <b>live</b> weather for the
+              course, generates four weeks of readings coherent with that real history, then runs
+              the prediction model against the <b>live 7-day forecast</b> — only the past readings
+              are synthetic; the forecast is real. Or clear everything to start fresh.
             </p>
             <div className="setup-demo-row">
               <button className="btn-ghost" onClick={onLoadDemo} disabled={busy != null}>
                 {busy === 'demo' ? 'Loading…' : 'Load demo data'}
               </button>
               <button className="btn-ghost danger" onClick={onClear} disabled={busy != null}>
-                {busy === 'clear' ? 'Clearing…' : 'Clear all readings'}
+                {busy === 'clear' ? 'Clearing…' : 'Clear all data'}
               </button>
             </div>
           </section>

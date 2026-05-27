@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { ReadingsProvider, useReadings } from './context/ReadingsContext';
 import { CourseProvider } from './context/CourseContext';
+import { PredictionsProvider, usePredictions } from './context/PredictionsContext';
 import { TopBar } from './components/TopBar';
 import { TabBar } from './components/TabBar';
 import { Toast } from './components/Toast';
@@ -20,6 +21,7 @@ import { useGps } from './lib/gps';
 
 function Shell() {
   const { readings, addReading, ready, error, clearError } = useReadings();
+  const { predictions } = usePredictions();
   const [tab, setTab] = useState<Tab>('capture');
   const [selectedHole, setSelectedHole] = useState(7);
   const [toast, setToast] = useState(false);
@@ -97,6 +99,7 @@ function Shell() {
         {ready && tab === 'analysis' && (
           <AnalysisScreen
             readings={readings}
+            predictions={predictions}
             selectedHole={selectedHole}
             onSelectHole={setSelectedHole}
           />
@@ -137,9 +140,11 @@ export function App() {
   return (
     <ErrorBoundary>
       <CourseProvider>
-        <ReadingsProvider>
-          <Shell />
-        </ReadingsProvider>
+        <PredictionsProvider>
+          <ReadingsProvider>
+            <Shell />
+          </ReadingsProvider>
+        </PredictionsProvider>
       </CourseProvider>
     </ErrorBoundary>
   );

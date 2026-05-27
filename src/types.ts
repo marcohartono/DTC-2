@@ -40,3 +40,13 @@ export interface MoistureBand {
 export type AnalysisView = 'heatmap' | 'trends' | 'table';
 export type AnalysisRange = 1 | 7 | 30;
 export type Tab = 'capture' | 'analysis' | 'history';
+
+// §4.5 weather-driven forecast.
+export interface VwcPrediction {
+  hole: number;
+  tTarget: number; // ms epoch of the predicted-for day
+  value: number;
+}
+
+// Heatmap forecast horizon. 0 = today (measured), others are days out.
+export type ForecastDay = 0 | 1 | 3 | 7;
